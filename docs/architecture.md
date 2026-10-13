@@ -114,7 +114,8 @@ framework safely. Read it before changing anything under `internal/`.
 ├── examples/           hello, todo, frameless, native; counter-native, vibrancy,
 │                       effort-slider, flyout, menubar-flyout, piano, farm
 │                       and mayoi (games), code-editor and gallery (native
-│                       UI); webview (web views in native UI)
+│                       UI); webview (web views in native UI); launcher
+│                       (a Spotlight-like panel, native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
@@ -1317,6 +1318,41 @@ as in Tauri:
   hears as the key window changing. The design follows GPUI's
   `WindowKind::AnchoredPopup` and winit's `WindowType::Popup`, which
   model xdg_positioner too.
+- Panels (`WindowOptions.Panel`), the windows of launchers: the core makes
+  them always on top, out of the taskbar, unable to minimize, maximize or
+  go full screen, and closes them on an Escape the content leaves, as
+  flyouts. macOS makes a `MyGoPanel`, an `NSPanel` with the nonactivating
+  style from `initWithContentRect:` on (the window server learns that a
+  window never activates its app from the style it is created with; a
+  style set later needs the private `_setPreventsActivation:`, as Electron
+  and tauri-nspanel found), never the main window, on every Space as a
+  full-screen auxiliary, outside Mission Control and the window cycle, at
+  the floating level (above it, input methods' candidate windows would
+  show behind the panel); `Show` and `Focus` make it key without
+  `activateIgnoringOtherApps:`, and its `cancelOperation:` does nothing
+  (NSPanel's closes it past `windowShouldClose:`). The key window of a
+  nonactivating panel gets the keys and the main menu its key
+  equivalents, though the app is not frontmost (`NSApp.isActive` reports
+  it active then). Windows makes a topmost tool window owned by the hidden
+  application window (a tool window alone may get a button on other
+  displays' taskbars, as PowerToys found), its corners rounded as
+  Windows 11 rounds other windows'; the key press of a `RegisterHotKey`
+  shortcut lets the process take the foreground, and hiding the panel
+  gives it back. Linux makes a sticky utility window, kept above, or on
+  Wayland a surface of the overlay layer (`internal/linux/layer.go`):
+  `libgtk-layer-shell.so.0` is loaded with the first panel, if it is
+  there (0.9 patches GTK 3's private structures and intercepts nothing
+  of libwayland, so it may load after GTK), and used where
+  `gtk_layer_is_supported` says the compositor speaks wlr-layer-shell, as
+  Ulauncher does. `gtk_layer_init_for_window` must come before GTK
+  realizes the window. A position is the top and left margins from the
+  edges of the output there (`gdk_display_get_monitor_at_point`), and
+  without one the compositor centers the surface; gtk-layer-shell sizes
+  it by its size request, not its default size. It asks for the keyboard
+  exclusively while it shows: compositors give none to an on-demand
+  surface as it maps, and Sway takes it back from one that goes from
+  exclusive to on demand. Neither Linux nor Windows shows the application
+  menu in a panel.
 - `window.open()` and `target=_blank` go through `SetWindowOpenHandler`. By
   default http(s) URLs open in the default browser. Allowing one creates a
   window around the configuration or related view WebKit provides, with its
@@ -3274,6 +3310,8 @@ which npm allows only for packages that exist: the first release uses an
 | traffic lights, Dock | yes | ignored | ignored |
 | hidden title bar | AppKit's traffic lights over a full-size content view | GTK's title buttons in header bars over the page, per `gtk-decoration-layout`; none where the Wayland compositor decorates windows | caption buttons drawn in a layered child window, through DirectComposition over a material; snap layouts; a top edge that resizes |
 | progress bar | Dock tile content view (NSBoxes: NSProgressIndicator does not draw there), app-wide | Unity launcher API over D-Bus (`com.canonical.Unity.LauncherEntry`), app-wide | `ITaskbarList3`, per window |
+| file icons | `NSWorkspace iconForFile:` drawn into an sRGB `NSBitmapImageRep` at the size | GIO's `standard::icon`, or a desktop entry's `GAppInfo` icon, through `gtk_icon_theme_lookup_by_gicon` | `IShellItemImageFactory::GetImage` (`SIIGBF_ICONONLY`), a DIB with straight alpha |
+| installed apps | `.app` bundles of the Applications folders, `NSFileManager displayNameAtPath:` and `NSBundle`, off the main thread; launched with `openURL:` | `g_app_info_get_all` filtered by `g_app_info_should_show`; launched with `g_app_info_launch` and GDK's launch context | `FOLDERID_AppsFolder` enumerated in an STA of its own; launched with `ShellExecute` of `shell:AppsFolder\<ID>` |
 | badge count | Dock tile label | Unity launcher API count | not shown |
 | skip taskbar | ignored | skip-taskbar hint | `ITaskbarList::DeleteTab` (the window style is untouched) |
 | FlashFrame | informational Dock bounce | urgency hint | `FlashWindowEx` until focused |
@@ -3296,6 +3334,7 @@ which npm allows only for packages that exist: the first release uses an
 | window position | honored | ignored by Wayland compositors | honored |
 | resize borders without a title bar | the window's own | the outer 5 px of the page | invisible, outside the window; along the top of a hidden title bar, a child window |
 | content protection, click-through | yes | ignored | yes |
+| panels | `NSPanel` with the nonactivating style, floating, on all Spaces as a full-screen auxiliary | sticky utility window, kept above, out of the taskbar and the pager; a gtk-layer-shell overlay surface on Wayland where it can be | topmost `WS_EX_TOOLWINDOW` owned by the hidden application window, rounded |
 | flyouts | borderless nonactivating `NSPanel` child window, or an `NSPopover`; placed in the visible frame | `GTK_WINDOW_POPUP` (override-redirect, placed in the work area, on X11; `xdg_popup` with `gdk_window_move_to_rect` on Wayland); focusable ones grab the seat | owned `WS_POPUP` + `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE` unless focusable, `CS_DROPSHADOW` for a shadow, with corners rounded by DWM on Windows 11 |
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | `LoadHTML` documents | a reload loads the base URL (`about:blank` without one), so the core cancels it (`Navigation.Reload`) and loads the HTML again; not in the history | as macOS | as macOS, but in the history: going back to one with a base URL loads that URL |

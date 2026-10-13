@@ -7,6 +7,9 @@ import (
 	"bytes"
 	"cmp"
 	"errors"
+	"image"
+	"image/png"
+	"os"
 	"runtime"
 	"strconv"
 	"sync"
@@ -267,6 +270,13 @@ func (b *Backend) Theme() platform.Theme     { return theme{b} }
 func (b *Backend) Power() platform.Power     { return power{b} }
 func (b *Backend) Network() platform.Network { return network{b} }
 func (b *Backend) Secrets() platform.Secrets { return secrets{b} }
+
+// Apps are the applications Applications lists, which tests set.
+var Apps []platform.Application
+
+func (b *Backend) Applications() ([]platform.Application, error) {
+	return append([]platform.Application(nil), Apps...), nil
+}
 
 func (b *Backend) NewTray(platform.TrayHandler) (platform.Tray, error) { return &tray{}, nil }
 
@@ -796,6 +806,25 @@ func (shell) OpenPath(string) error     { return nil }
 func (shell) ShowItemInFolder(string)   {}
 func (shell) TrashItem(string) error    { return nil }
 func (shell) Beep()                     {}
+
+// Opened are the paths OpenApplication was given.
+var Opened []string
+
+func (shell) OpenApplication(path string) error {
+	Opened = append(Opened, path)
+	return nil
+}
+
+// FileIcon returns a transparent PNG of the size asked for, or the error of
+// a path that does not exist.
+func (shell) FileIcon(path string, size int) ([]byte, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	err := png.Encode(&buf, image.NewNRGBA(image.Rect(0, 0, size, size)))
+	return buf.Bytes(), err
+}
 
 type power struct{ b *Backend }
 
