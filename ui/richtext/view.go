@@ -323,10 +323,21 @@ func (v *view) replaced(c change, now Text) {
 			v.laid--
 		}
 	}
-	added := make([]paraView, npz-pa+1)
-	v.paras = slices.Replace(v.paras, pa, pz+1, added...)
+	if npz == pz {
+		// As many paragraphs: they give up their heights in place, as a
+		// keystroke's does, rather than summing all the others again.
+		for p := pa; p <= pz; p++ {
+			if h := v.paras[p].h; h > 0 {
+				v.hs.add(p, -float64(h), 1)
+			}
+			v.paras[p] = paraView{}
+		}
+	} else {
+		added := make([]paraView, npz-pa+1)
+		v.paras = slices.Replace(v.paras, pa, pz+1, added...)
+		v.resetHeights()
+	}
 	v.shown = now
-	v.resetHeights()
 	switch {
 	case v.anchor > pz:
 		v.anchor += npz - pz
