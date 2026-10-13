@@ -107,7 +107,7 @@ func (a *app) view(c *ui.Context) {
 			})
 			ui.Sidebar(c, &a.selected, func() {
 				for _, n := range a.notes {
-					ui.SidebarItem(c, strconv.Itoa(n.ID), nil, n.title()).Key(n.ID)
+					ui.SidebarItem(c.Key(n.ID), strconv.Itoa(n.ID), nil, n.title())
 				}
 			}).Grow(1).Label("Notes")
 		})

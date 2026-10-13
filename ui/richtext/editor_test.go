@@ -282,3 +282,39 @@ func TestRichTextFormatMenu(t *testing.T) {
 		t.Fatalf("%q %+v", runsOf(at), at.ParagraphStyleAt(0))
 	}
 }
+
+// TestRichTextEdgesAsNSTextView checks the edges a Swift probe measured of
+// NSTextView on macOS 27: Enter and Backspace after bold keep typing bold,
+// a link extends only inside, never at its start.
+func TestRichTextEdgesAsNSTextView(t *testing.T) {
+	bold := Attributes{Weight: 700}
+	link := Attributes{Link: "https://x"}
+	cases := []struct {
+		name  string
+		text  Text
+		caret int
+		keys  func(tt *ui.Tester)
+		want  string
+	}{
+		{"enter at the end of bold", TextOf(Paragraph{Runs: []Run{{Text: "plain "}, {Text: "bold", Attributes: bold}}}, Paragraph{Runs: []Run{{Text: "next"}}}), 10,
+			func(tt *ui.Tester) { tt.Key(0, ui.KeyEnter); typeRunes(tt, "x") }, "plain |*bold\nx\n*|next"},
+		{"backspace a bold character", TextOf(Paragraph{Runs: []Run{{Text: "plain "}, {Text: "B", Attributes: bold}}}), 7,
+			func(tt *ui.Tester) { tt.Key(0, ui.KeyBackspace); typeRunes(tt, "x") }, "plain |*x*"},
+		{"the start of a link", TextOf(Paragraph{Runs: []Run{{Text: "see "}, {Text: "docs", Attributes: link}}}), 4,
+			func(tt *ui.Tester) { typeRunes(tt, "x") }, "see x|[docs]"},
+		{"a link starting a paragraph", TextOf(Paragraph{Runs: []Run{{Text: "docs", Attributes: link}, {Text: " now"}}}), 0,
+			func(tt *ui.Tester) { typeRunes(tt, "x") }, "x|[docs]| now"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doc := NewDocument(c.text)
+			tt, _ := richTester(t, doc)
+			doc.SetSelection(c.caret, c.caret)
+			tt.Frame()
+			c.keys(tt)
+			if got := runsOf(doc.Text()); got != c.want {
+				t.Fatalf("runs %q, want %q", got, c.want)
+			}
+		})
+	}
+}
