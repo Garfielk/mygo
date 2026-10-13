@@ -49,7 +49,10 @@ type markdownDemo struct {
 	shown  bool
 }
 
-var revealUnits = []string{"Word", "Character", "Line", "Paragraph", "At once"}
+var (
+	revealNames = []string{"Word", "Character", "Sentence", "Line", "Paragraph", "At once"}
+	revealUnits = []markdown.RevealUnit{markdown.ByWord, markdown.ByCharacter, markdown.BySentence, markdown.ByLine, markdown.ByParagraph, markdown.AtOnce}
+)
 
 func (g *gallery) markdownPage(c *ui.Context) {
 	m := &g.md
@@ -62,10 +65,10 @@ func (g *gallery) markdownPage(c *ui.Context) {
 		if ui.PrimaryButton(c, "Stream it").Clicked() {
 			g.streamMarkdown()
 		}
-		ui.Segmented(c, &m.unit, revealUnits...)
+		ui.Segmented(c, &m.unit, revealNames...)
 		ui.Checkbox(c, &m.wrap, "Wrap code")
 	})
-	m.opts.Reveal = &markdown.Reveal{Unit: markdown.RevealUnit(m.unit)}
+	m.opts.Reveal = &markdown.Reveal{Unit: revealUnits[m.unit]}
 	m.opts.WrapCode = m.wrap
 	box := ui.Column(c).Padding(20, 24).Radius(t.Radius+4).Border(1, t.Border).Background(t.Background).MaxWidth(760)
 	box.Children(func() {

@@ -32,14 +32,27 @@ type chat struct {
 	md       markdown.Options
 	next     int
 	replies  int
+	// reveal is how replies come in: by word, sentence, line or
+	// paragraph, or at once.
+	reveal int
 }
+
+var (
+	revealNames = []string{"Word", "Sentence", "Line", "Paragraph", "At once"}
+	revealUnits = []markdown.RevealUnit{markdown.ByWord, markdown.BySentence, markdown.ByLine, markdown.ByParagraph, markdown.AtOnce}
+)
 
 func (app *chat) view(c *ui.Context) {
 	t := c.Theme()
 	app.list.Key = func(i int) any { return app.messages[i].id }
 	app.list.FollowEnd = true
 	app.list.FollowAnimation = &ui.Smooth // glide up as the reply grows
+	app.md.Reveal = &markdown.Reveal{Unit: revealUnits[app.reveal]}
 	ui.Column(c).Fill().Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(8, 20).BorderWidth(0, 0, 1, 0).BorderColor(t.Border).Children(func() {
+			ui.Text(c, "Stream by").TextColor(t.TextMuted)
+			ui.Segmented(c, &app.reveal, revealNames...).Label("Stream by")
+		})
 		ui.List(c, &app.list, len(app.messages), func(i int) {
 			app.message(c, app.messages[i])
 		}).Grow(1).Padding(16, 20).Gap(16).Justify(ui.End).Children(func() {

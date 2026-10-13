@@ -31,6 +31,10 @@ const (
 	ByWord RevealUnit = iota
 	// ByCharacter shows a character at a time.
 	ByCharacter
+	// BySentence shows a sentence at a time, once it is complete: up to
+	// a period, a question or exclamation mark followed by a space, an
+	// ideographic full stop, or the end of a line.
+	BySentence
 	// ByLine shows a line at a time, once it is complete.
 	ByLine
 	// ByParagraph shows a paragraph, a block between blank lines, at a
@@ -79,16 +83,16 @@ func (rs *revealState) step(c *ui.Context, src string, streaming bool, r *Reveal
 		return rs.shown, false
 	}
 	target := len(src)
-	if streaming && (r.Unit == ByLine || r.Unit == ByParagraph) {
-		// Only complete lines, or paragraphs, while more is coming.
-		sep := "\n"
-		if r.Unit == ByParagraph {
-			sep = "\n\n"
-		}
-		if k := strings.LastIndex(src, sep); k >= 0 {
-			target = k + len(sep)
-		} else {
-			target = 0
+	if streaming && r.Unit != ByWord && r.Unit != ByCharacter {
+		// Only complete sentences, lines or paragraphs, while more is
+		// coming.
+		target = rs.shown
+		for i := rs.shown; ; {
+			e := unitEnd(src, i, len(src), r.Unit)
+			if e < 0 {
+				break
+			}
+			target, i = e, e
 		}
 	}
 	if rs.shown >= target {
@@ -133,13 +137,9 @@ func snap(src string, i, target int, u RevealUnit) int {
 		for i < target && (src[i] == ' ' || src[i] == '\n') {
 			i++
 		}
-	case ByLine, ByParagraph:
-		sep := "\n"
-		if u == ByParagraph {
-			sep = "\n\n"
-		}
-		if k := strings.Index(src[i:target], sep); k >= 0 {
-			i += k + len(sep)
+	case BySentence, ByLine, ByParagraph:
+		if e := unitEnd(src, i, target, u); e >= 0 {
+			i = e
 		} else {
 			i = target
 		}
@@ -148,6 +148,41 @@ func snap(src string, i, target int, u RevealUnit) int {
 		i++
 	}
 	return i
+}
+
+// unitEnd returns where the first sentence, line or paragraph of src
+// ending after i and by limit ends, or -1.
+func unitEnd(src string, i, limit int, u RevealUnit) int {
+	switch u {
+	case ByLine:
+		if k := strings.IndexByte(src[i:limit], '\n'); k >= 0 {
+			return i + k + 1
+		}
+	case ByParagraph:
+		if k := strings.Index(src[i:limit], "\n\n"); k >= 0 {
+			return i + k + 2
+		}
+	case BySentence:
+		for j := i; j < limit; {
+			r, n := utf8.DecodeRuneInString(src[j:limit])
+			j += n
+			switch r {
+			case '\n':
+				return j
+			case '.', '!', '?', '…':
+				// Closing quotes and brackets go with it, then a space.
+				for j < limit && strings.IndexByte(`"')]*_`, src[j]) >= 0 {
+					j++
+				}
+				if j < limit && (src[j] == ' ' || src[j] == '\n') {
+					return j + 1
+				}
+			case '。', '！', '？':
+				return j
+			}
+		}
+	}
+	return -1
 }
 
 // fader returns the opacity of text at a source offset as it fades in,

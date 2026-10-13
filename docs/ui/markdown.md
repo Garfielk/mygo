@@ -69,9 +69,11 @@ app.md.Reveal = &markdown.Reveal{
 }
 ```
 
-`ByWord` (the default), `ByCharacter`, `ByLine` and `ByParagraph` show a
-unit at a time, the last two only once it is complete; `AtOnce` shows
-text as it comes. A negative `Fade` turns fading off, as does the
+`ByWord` (the default), `ByCharacter`, `BySentence`, `ByLine` and
+`ByParagraph` show a unit at a time, the last three only once it is
+complete: a sentence ends at a period, a question or exclamation mark
+followed by a space, an ideographic full stop or the end of a line.
+`AtOnce` shows text as it comes. A negative `Fade` turns fading off, as does the
 desktop's Reduce Motion. Text fades by its color and the rest of blocks
 (list markers, code blocks, a table's rows) by their opacity, which
 paint only: nothing is laid out again for it. What is still to reveal

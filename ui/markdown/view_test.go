@@ -238,3 +238,52 @@ func TestFadeReplayed(t *testing.T) {
 		t.Error("text streamed again did not fade in")
 	}
 }
+
+func TestSentenceEnds(t *testing.T) {
+	for _, c := range []struct {
+		src  string
+		want int
+	}{
+		{"Pi is 3.14 today. Next", len("Pi is 3.14 today. ")},
+		{`He said "go." Then`, len(`He said "go." `)},
+		{"Really? Yes", len("Really? ")},
+		{"一句话。下一句", len("一句话。")},
+		{"- an item\n- next", len("- an item\n")},
+		{"Not done yet", -1},
+		{"Ends here.", -1}, // the space after it has not come
+	} {
+		if got := unitEnd(c.src, 0, len(c.src), BySentence); got != c.want {
+			t.Errorf("%q: sentence ends at %d, want %d", c.src, got, c.want)
+		}
+	}
+}
+
+// TestRevealBySentence checks that Stream by sentence shows only the
+// sentences complete while more is coming, and all once done.
+func TestRevealBySentence(t *testing.T) {
+	text, done := "", false
+	o := &Options{Reveal: &Reveal{Unit: BySentence, CatchUp: time.Millisecond}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		if done {
+			View(c, text, o)
+		} else {
+			Stream(c, text, o)
+		}
+	}, 600, 400)
+	text = "First sentence here. Second one is still"
+	for range 10 {
+		time.Sleep(10 * time.Millisecond)
+		tt.Frame()
+	}
+	if got := strings.Join(tt.Texts(), ""); got != "First sentence here." {
+		t.Errorf("streaming shows %q", got)
+	}
+	done = true
+	for range 10 {
+		time.Sleep(10 * time.Millisecond)
+		tt.Frame()
+	}
+	if got := strings.Join(tt.Texts(), ""); got != text {
+		t.Errorf("done, shows %q", got)
+	}
+}
