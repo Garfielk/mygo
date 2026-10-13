@@ -167,6 +167,9 @@ type look struct {
 	code, quote       ui.Color
 	accent, selection ui.Color
 	indent            float32 // DIPs a level of indentation takes
+	// width is the room of the paragraph being laid out, which
+	// attachments shrink to.
+	width    float32
 	tagStyle          func(tag string, s *ui.Span)
 }
 
@@ -459,6 +462,14 @@ func (look *look) span(text string, a Attributes, st ParagraphStyle) ui.Span {
 	if a.Tag != "" && look.tagStyle != nil {
 		look.tagStyle(a.Tag, &s)
 	}
+	if at := a.Attachment; at != nil {
+		// A box of the attachment's size, scaled down to the width.
+		w, h := at.size()
+		if look.width > 0 && w > look.width {
+			w, h = look.width, h*look.width/w
+		}
+		s.ObjectWidth, s.ObjectHeight = w, h
+	}
 	return s
 }
 
@@ -484,6 +495,8 @@ func (v *view) paraLayout(p int) *paraView {
 		return pv
 	}
 	composed := compose
+	left, right := v.insets(para.style)
+	v.look.width = max(v.width-left-right, 1)
 	line := v.lineOf(p)
 	var spans []ui.Span
 	var typing Attributes
@@ -522,8 +535,7 @@ func (v *view) paraLayout(p int) *paraView {
 	if compose != "" {
 		spans = append(spans, v.look.span(compose, typing, para.style))
 	}
-	left, right := v.insets(para.style)
-	shape := ui.TextShape{Width: max(v.width-left-right, 1), Align: para.style.Align}
+	shape := ui.TextShape{Width: v.look.width, Align: para.style.Align}
 	l := ui.ShapeRichTextWith(spans, v.paraFont(para.style), shape)
 	units := pv.units[:0]
 	units = append(units, 0)

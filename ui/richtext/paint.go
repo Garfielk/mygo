@@ -44,6 +44,7 @@ func (v *view) paint(p *ui.Painter, r ui.Rect) {
 			}
 		}
 		p.TextLayout(pv.layout, x, y, look.text)
+		v.paintAttachments(p, i, pv, x, y)
 		v.paintMarker(p, i, st, pv, x, y)
 		if v.compose != "" && v.shown.paraAt(v.caret) == i {
 			c := v.local(i, v.caret)
@@ -202,4 +203,39 @@ func romanNumber(n int) string {
 		}
 	}
 	return string(b)
+}
+
+// paintAttachments draws the attachments of paragraph p in the boxes its
+// layout, at (x, y), keeps for them: an image, the app's drawing, or a
+// box with the attachment's name.
+func (v *view) paintAttachments(p *ui.Painter, i int, pv *paraView, x, y float32) {
+	objects := pv.layout.Objects()
+	if len(objects) == 0 {
+		return
+	}
+	ps := v.shown.paraStart(i)
+	for _, o := range objects {
+		l := pv.runeOfUnit(o.Index)
+		at := v.shown.AttributesAt(v.global(i, l)).Attachment
+		if v.compose != "" && v.shown.paraAt(v.caret) == i && l >= v.caret-ps && l < v.caret-ps+len([]rune(v.compose)) {
+			continue
+		}
+		r := ui.Rect{X: x + o.Rect.X, Y: y + o.Rect.Y, W: o.Rect.W, H: o.Rect.H}
+		switch {
+		case at == nil:
+		case at.Draw != nil:
+			at.Draw(p, r)
+		case at.Image != nil:
+			p.Image(at.Image, r, ui.Contain)
+		default:
+			// Not loaded: a box with its name.
+			p.Fill(r, v.look.code, 4)
+			p.Stroke(r, v.look.quote, 4, 1)
+			if at.Name != "" {
+				l := ui.ShapeText(at.Name, ui.Font{Size: v.look.size * 0.85}, max(r.W-8, 1))
+				_, lh := l.Size()
+				p.Clip(r, 4, func() { p.TextLayout(l, r.X+4, r.Y+(r.H-lh)/2, v.look.muted) })
+			}
+		}
+	}
 }

@@ -136,6 +136,44 @@ func shapeTextAligned(s string, font Font, shape TextShape, spans []Span) *TextL
 	return t
 }
 
+// TextObject is an inline object of a TextLayout (Span.ObjectWidth): the
+// UTF-16 offset of its object replacement character, and its box,
+// standing on its line's baseline.
+type TextObject struct {
+	Index int
+	Rect  Rect
+}
+
+// Objects returns the inline objects of the layout, in the order of the
+// text, where a rich text editor draws its attachments.
+func (t *TextLayout) Objects() []TextObject {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []TextObject
+	var spans []text.Span
+	for _, line := range t.l.Lines {
+		for _, g := range line.Glyphs {
+			if !g.Object {
+				continue
+			}
+			if spans == nil {
+				spans = text.DecodeSpans(t.l.Params.Spans)
+			}
+			h := float32(0)
+			end := 0
+			for _, sp := range spans {
+				end = sp.End
+				if g.Cluster < end {
+					h = sp.ObjectHeight
+					break
+				}
+			}
+			out = append(out, TextObject{Index: t.units[g.Cluster], Rect: Rect{X: g.X, Y: line.Baseline - h, W: g.Advance, H: h}})
+		}
+	}
+	return out
+}
+
 // Size is the layout's extent in DIPs.
 func (t *TextLayout) Size() (float32, float32) {
 	t.mu.Lock()
