@@ -139,3 +139,9 @@ func axAttribute(*mygo.Window, string, string) (string, bool, bool, bool) {
 }
 
 func pressEscape(*mygo.Window) bool { return false }
+
+func documentChrome(*mygo.Window) (string, string, bool, bool, bool) {
+	return "", "", false, false, false
+}
+func sheet(*mygo.Window) ([]string, []string, bool, bool) { return nil, nil, false, false }
+func endSheetButton(*mygo.Window, int) bool               { return false }
