@@ -149,7 +149,13 @@ type inlineParser struct {
 	scannedBackticks bool
 	html             htmlMemo
 	noMath           int // no closing $$ after this offset
-	labels           []string
+	// noDollar, noParen and noBracket are the offsets after which no $,
+	// \) or \] closes math, so that openers repeated stay linear.
+	noDollar, noParen, noBracket int
+	// openMath is where $$ opens math that nothing closes, or -1, and hide
+	// a bracket healing leaves out, as the text of a link being written.
+	openMath, hide int
+	labels         []string
 	// leftover are the openers no closer matched, for healing.
 	leftover []delim
 	probe    bool
@@ -173,6 +179,7 @@ func (ip *inlineParser) parse(d *Document, i int, heal bool) ([]Inline, []string
 	s := text[a:b]
 	ip.d, ip.ext = d, d.ext
 	ip.labels = nil
+	ip.hide = -1
 	healFrom := len(s)
 	built := false
 	if heal {
@@ -197,6 +204,7 @@ func (ip *inlineParser) run(s string) {
 	ip.scannedBackticks = false
 	ip.html.reset()
 	ip.noMath = -1
+	ip.noDollar, ip.noParen, ip.noBracket, ip.openMath = -1, -1, -1, -1
 	ip.leftover = ip.leftover[:0]
 	for ip.pos < len(s) {
 		ip.parseInline()
@@ -321,12 +329,20 @@ func (ip *inlineParser) parseInline() {
 			ip.pos++
 		}
 	case '[':
-		n := ip.addLiteral("[", ip.pos, ip.pos+1)
+		text := "["
+		if ip.pos == ip.hide {
+			text = ""
+		}
+		n := ip.addLiteral(text, ip.pos, ip.pos+1)
 		ip.addBracket(n, ip.pos+1, false)
 		ip.pos++
 	case '!':
 		if ip.pos+1 < len(s) && s[ip.pos+1] == '[' {
-			n := ip.addLiteral("![", ip.pos, ip.pos+2)
+			text := "!["
+			if ip.pos == ip.hide {
+				text = ""
+			}
+			n := ip.addLiteral(text, ip.pos, ip.pos+2)
 			ip.addBracket(n, ip.pos+2, true)
 			ip.pos += 2
 		} else {
@@ -434,11 +450,17 @@ func (ip *inlineParser) parseBackslash() {
 			}
 			return
 		case (c == '(' || c == '[') && ip.ext&ExtMath != 0:
-			end := `\)`
+			end, none := `\)`, &ip.noParen
 			if c == '[' {
-				end = `\]`
+				end, none = `\]`, &ip.noBracket
 			}
-			if k := strings.Index(s[ip.pos+1:], end); k > 0 {
+			k := -1
+			if *none < 0 || ip.pos < *none {
+				if k = strings.Index(s[ip.pos+1:], end); k < 0 {
+					*none = ip.pos
+				}
+			}
+			if k > 0 {
 				tex := s[ip.pos+1 : ip.pos+1+k]
 				n := ip.newNode(Math, tex, ip.pos-1, ip.pos+1+k+2)
 				ip.nodes[n].display = c == '['
@@ -529,6 +551,9 @@ func (ip *inlineParser) parseDollar() bool {
 		k := strings.Index(s[start+2:], "$$")
 		if k < 0 {
 			ip.noMath = start
+			if ip.openMath < 0 {
+				ip.openMath = start
+			}
 			return false
 		}
 		if strings.Trim(s[start+2:start+2+k], " \t\n") == "" {
@@ -547,6 +572,14 @@ func (ip *inlineParser) parseDollar() bool {
 	if start+1 >= len(s) || s[start+1] == ' ' || s[start+1] == '\t' || s[start+1] == '\n' || isASCIIDigit(s[start+1]) {
 		return false
 	}
+	if ip.noDollar >= 0 && start >= ip.noDollar {
+		return false
+	}
+	defer func() {
+		if ip.pos == start {
+			ip.noDollar = start
+		}
+	}()
 	for j := start + 1; j < len(s); j++ {
 		switch s[j] {
 		case '\\':
@@ -977,7 +1010,7 @@ func (ip *inlineParser) parseCloseBracket() {
 		return
 	}
 	// A footnote reference: [^label], when the footnote is defined.
-	if ip.ext&ExtFootnotes != 0 && !op.image && op.index < start-1 && s[op.index] == '^' && start-1 > op.index+1 {
+	if ip.ext&ExtFootnotes != 0 && !op.image && !op.bracketAfter && op.index < start-1 && s[op.index] == '^' && start-1 > op.index+1 && start-1-op.index <= 1000 {
 		key := normalizeLabel(s[op.index+1 : start-1])
 		ip.noteLabel("^" + key)
 		if _, ok := ip.d.notes[key]; ok {

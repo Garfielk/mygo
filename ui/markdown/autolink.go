@@ -215,13 +215,8 @@ func (ip *inlineParser) splitEmails(c int32) {
 		if !ok {
 			return
 		}
-		exact := nd.text == ip.s[nd.start:nd.end]
-		off := func(i int) int {
-			if exact {
-				return nd.start + i
-			}
-			return min(nd.start+i, nd.end)
-		}
+		source := ip.s[nd.start:min(nd.end, len(ip.s))]
+		off := func(i int) int { return nd.start + literalToSource(source, data, i) }
 		start, end := nd.start, nd.end
 		la, lb := off(a), off(b)
 		dest := data[a:b]

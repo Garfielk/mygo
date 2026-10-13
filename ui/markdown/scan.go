@@ -535,8 +535,33 @@ func scanEntity(s string, i int) (int, string) {
 	}
 	ent := s[i : j+1]
 	text := html.UnescapeString(ent)
-	if text == ent {
+	// A legacy name's prefix decodes, leaving the rest: &notit; is ¬it;.
+	if text == ent || strings.HasSuffix(text, ";") && ent != "&semi;" {
 		return 0, ""
 	}
 	return j + 1 - i, text
+}
+
+// literalToSource returns the offset in source of byte j of text, the
+// literal it reads as: escapes and entities decoded, the rest as it is.
+func literalToSource(source, text string, j int) int {
+	if source == text {
+		return min(j, len(source))
+	}
+	i, k := 0, 0
+	for i < len(source) && k < j {
+		switch c := source[i]; {
+		case c == '\\' && i+1 < len(source) && isEscapable(source[i+1]) && k < len(text) && text[k] == source[i+1]:
+			i, k = i+2, k+1
+		case c == '&':
+			if n, lit := scanEntity(source, i); n > 0 && strings.HasPrefix(text[k:], lit) {
+				i, k = i+n, k+len(lit)
+				continue
+			}
+			i, k = i+1, k+1
+		default:
+			i, k = i+1, k+1
+		}
+	}
+	return i
 }

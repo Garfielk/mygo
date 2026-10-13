@@ -1,6 +1,9 @@
 package markdown
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Healing completes what the end of a streaming document leaves open in
 // the inline content of its last block, as Vercel's remend does to the
@@ -14,9 +17,7 @@ func (ip *inlineParser) heal(s string) (string, int, bool) {
 	s = trimTrailingMarkers(s)
 	from := len(s)
 	// A link whose destination is being written: [text](http…
-	if k := pendingLink(s); k >= 0 {
-		s += ")"
-	}
+	s += pendingLink(s)
 	// A code span not closed.
 	if ticks := openCodeSpan(s); ticks > 0 {
 		run := 0
@@ -27,47 +28,53 @@ func (ip *inlineParser) heal(s string) (string, int, bool) {
 			run = 0
 		}
 		s += strings.Repeat("`", ticks-run)
-		return s, from, false
 	}
-	// Math between $$ not closed.
-	if ip.ext&ExtMath != 0 && strings.Count(s, "$$")%2 == 1 && !strings.HasSuffix(s, "$$") {
-		s += "$$"
+	// The closing tildes of strikethrough half written: ~~struck~.
+	if strings.HasSuffix(s, "~") && !strings.HasSuffix(s, "~~") && strings.Contains(s, "~~") {
+		s += "~"
 	}
-	// Emphasis and strikethrough not closed: the openers the parser
-	// leaves, innermost first.
+	// Emphasis, strikethrough and math not closed: the openers the parser
+	// leaves, innermost first; and the text of a link being written shows
+	// without its bracket.
 	ip.run(s)
-	built := true
-	if len(ip.leftover) > 0 {
-		var b strings.Builder
-		b.WriteString(s)
-		n := 0
-		for _, d := range ip.leftover {
-			if d.c == '*' && wordInside(s, d.at, d.orig) {
-				continue
-			}
-			b.WriteString(strings.Repeat(string(d.c), d.n))
-			n++
-		}
-		if n > 0 {
-			s = b.String()
-			built = false
-		}
+	type opener struct {
+		at     int
+		closer string
 	}
-	return s, from, built
+	var open []opener
+	for _, d := range ip.leftover {
+		if d.c == '*' && wordInside(s, d.at, d.orig) || d.c == '~' && d.orig == 1 {
+			continue // 2*3, or a tilde for "about", as ~200
+		}
+		open = append(open, opener{d.at, strings.Repeat(string(d.c), d.n)})
+	}
+	if ip.ext&ExtMath != 0 && ip.openMath >= 0 {
+		open = append(open, opener{ip.openMath, "$$"})
+	}
+	if ip.lastB >= 0 {
+		ip.hide = ip.nodes[ip.br[ip.lastB].node].start
+	}
+	if len(open) == 0 && ip.hide < 0 {
+		return s, from, true
+	}
+	slices.SortStableFunc(open, func(a, b opener) int { return b.at - a.at })
+	var b strings.Builder
+	b.WriteString(s)
+	for _, o := range open {
+		b.WriteString(o.closer)
+	}
+	return b.String(), from, false
 }
 
 // wordInside reports whether a run of n delimiters at i has letters or
-// digits on both sides, as 2*3, which is not emphasis being written.
+// digits of ASCII on both sides, as 2*3, which is not emphasis being
+// written.
 func wordInside(s string, i, n int) bool {
 	if i == 0 || i+n >= len(s) {
 		return false
 	}
-	before, after := rune(s[i-1]), rune(s[i+n])
-	return isAlnumByte(before) && isAlnumByte(after)
-}
-
-func isAlnumByte(r rune) bool {
-	return r < 0x80 && (isASCIILetter(byte(r)) || isASCIIDigit(byte(r))) || r >= 0x80
+	isWord := func(c byte) bool { return isASCIILetter(c) || isASCIIDigit(c) }
+	return isWord(s[i-1]) && isWord(s[i+n])
 }
 
 // trimTrailingMarkers drops what the end of s may be starting, with
@@ -108,22 +115,42 @@ func trimTrailingMarkers(s string) string {
 // span s opens.
 func closesSpan(s string, n int) bool { return openCodeSpan(s) == n }
 
-// pendingLink returns where a link's destination being written starts in
-// s, after ](, or -1.
-func pendingLink(s string) int {
+// pendingLink returns what closes the destination of a link being
+// written at the end of s, after ](, or nothing: the parentheses it
+// opened, and the link's, or > and ) for one in angle brackets.
+func pendingLink(s string) string {
 	k := strings.LastIndex(s, "](")
 	if k < 0 || !strings.Contains(s[:k], "[") {
-		return -1
-	}
-	rest := s[k+2:]
-	if strings.ContainsAny(rest, ") \t\n") {
-		return -1
+		return ""
 	}
 	// Not inside a code span.
 	if strings.Count(s[:k], "`")%2 == 1 {
-		return -1
+		return ""
 	}
-	return k + 2
+	rest := s[k+2:]
+	if strings.HasPrefix(rest, "<") {
+		if strings.ContainsAny(rest, ">\n") {
+			return ""
+		}
+		return ">)"
+	}
+	depth := 0
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '\\':
+			i++
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return "" // the link is closed
+			}
+			depth--
+		case ' ', '\t', '\n':
+			return ""
+		}
+	}
+	return strings.Repeat(")", depth+1)
 }
 
 // openCodeSpan returns the length of the run of backticks opening a code
