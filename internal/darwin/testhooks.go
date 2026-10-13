@@ -5,6 +5,7 @@ package darwin
 import (
 	"fmt"
 	"math"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -58,6 +59,13 @@ func TestPerformKeyEquivalent(key string, shift bool) bool {
 		handled = sendBool(send(theBackend.app, "mainMenu"), "performKeyEquivalent:", uintptr(ev))
 	})
 	return handled
+}
+
+// TestOnScreen reports whether some of a window shows on screen, as the
+// window server reports once it put the window there.
+func TestOnScreen(handle uintptr) bool {
+	const occlusionStateVisible = 1 << 1
+	return sendInt(id(handle), "occlusionState")&occlusionStateVisible != 0
 }
 
 // TestEndSheet ends the sheet attached to a window as if its first button
@@ -219,6 +227,18 @@ func TestSetWindowAppearance(handle uintptr, dark bool) {
 func TestWebViewAttached(handle uintptr) bool {
 	w := theBackend.byNSWindow[id(handle)]
 	return w != nil && send(w.web, "window") == w.win
+}
+
+// TestIsFrontmost reports whether the application is the frontmost one,
+// which NSApp's isActive does not tell while a nonactivating panel is the
+// key window: it reports the app active then.
+func TestIsFrontmost() bool {
+	var front bool
+	withPool(func() {
+		app := send(send(class("NSWorkspace"), "sharedWorkspace"), "frontmostApplication")
+		front = app != 0 && sendInt(app, "processIdentifier") == os.Getpid()
+	})
+	return front
 }
 
 // TestCollectionBehavior returns a window's NSWindowCollectionBehavior.
