@@ -81,12 +81,14 @@ func TestForeground(hwnd uintptr) bool {
 func TestEndMenu() { procEndMenu.Call() }
 
 // TestPanelStyles reports whether a window is a topmost tool window
-// owned by the hidden application window, as panels are.
+// without a window menu, owned by the hidden application window, as
+// panels are.
 func TestPanelStyles(hwnd uintptr) (tool, topmost, owned bool) {
 	const gwOwner = 4
 	ex := windowLong(hwnd, gwlExStyle)
 	owner, _, _ := procGetNextWindow.Call(hwnd, gwOwner)
-	return ex&wsExToolWindow != 0, ex&wsExTopmost != 0, owner != 0 && owner == theBackend.appHwnd
+	menu := windowLong(hwnd, gwlStyle)&wsSysMenu != 0
+	return ex&wsExToolWindow != 0 && !menu, ex&wsExTopmost != 0, owner != 0 && owner == theBackend.appHwnd
 }
 
 // TestActivateAccelerator runs the menu item of a window's shortcut, as its

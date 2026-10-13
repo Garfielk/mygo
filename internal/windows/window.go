@@ -232,8 +232,11 @@ func (w *window) styles() (style, ex uint32) {
 	}
 	if o.Panel {
 		// Out of the taskbar and Alt+Tab, on whichever virtual desktop
-		// is current as it shows, and above other apps' windows.
+		// is current as it shows, and above other apps' windows. Without
+		// a window menu: DWM draws the close button of a tool window's
+		// menu where a material extends the frame, over the content.
 		ex |= wsExToolWindow | wsExTopmost
+		style &^= wsSysMenu
 	}
 	if w.noRedirect {
 		ex |= wsExNoRedirect

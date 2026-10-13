@@ -33,7 +33,7 @@ func TestPanel(t *testing.T) {
 		t.Errorf("collection behavior %#x, want CanJoinAllSpaces, IgnoresCycle and FullScreenAuxiliary", b)
 	}
 	if tool, topmost, owned, ok := panelStyles(panel); ok && !(tool && topmost && owned) {
-		t.Errorf("panel: tool window %v, topmost %v, owned by the application window %v", tool, topmost, owned)
+		t.Errorf("panel: tool window without a window menu %v, topmost %v, owned by the application window %v", tool, topmost, owned)
 	}
 	panel.Page().LoadHTML(`<input id=i autofocus>`, "")
 	waitFor(t, panel, "document.getElementById('i')")
