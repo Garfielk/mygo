@@ -38,6 +38,7 @@ func (app *chat) view(c *ui.Context) {
 	t := c.Theme()
 	app.list.Key = func(i int) any { return app.messages[i].id }
 	app.list.FollowEnd = true
+	app.list.FollowAnimation = &ui.Smooth // glide up as the reply grows
 	ui.Column(c).Fill().Children(func() {
 		ui.List(c, &app.list, len(app.messages), func(i int) {
 			app.message(c, app.messages[i])

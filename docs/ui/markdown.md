@@ -80,12 +80,15 @@ when the message switches to `View` keeps coming in.
 ## A chat
 
 Show each message as a row of a [list](list.md) that follows its end:
-the list keeps the end in view as the reply grows, until the user
-scrolls up.
+the list keeps the end in view as the reply grows, gliding up to it with
+`FollowAnimation`, until the user scrolls up, and follows again once
+they scroll back to the end. `AtEnd` and `ScrollToEnd` make a button
+back to the latest.
 
 ```go
 app.list.Key = func(i int) any { return app.messages[i].ID }
 app.list.FollowEnd = true
+app.list.FollowAnimation = &ui.Smooth
 ui.List(c, &app.list, len(app.messages), func(i int) {
 	app.message(c, app.messages[i])
 }).Grow(1).Gap(16).Justify(ui.End)

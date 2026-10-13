@@ -1859,7 +1859,11 @@ either.
   rows are measured, and the others are estimated as their average; the
   content's size, and its offset, are where those heights put the rows,
   in float64, as all scroll offsets are, so that millions of rows scroll
-  by fractions of a DIP. Rows are placed relative to the list, the offset
+  by fractions of a DIP. Following its end with a `FollowAnimation`, a
+  list notes where the top of its last row was placed; as rows grow or
+  come, that row goes up, and the rows show as far below their place,
+  which a motion channel takes back to nothing (`glideToEnd`), counted
+  as at the end. Rows are placed relative to the list, the offset
   they were placed at kept as `scrollBase` for placing and revealing. An
   offset the wheel, the keys, the scroll bar or the app changed moves the
   place by as much when it is a step (up to two views), so rows not
