@@ -71,7 +71,7 @@ func TestPanel(t *testing.T) {
 	// An Escape the page handles keeps it.
 	panel.Show()
 	eventually(t, "the panel focused again", panel.IsFocused)
-	panel.Page().Eval(`addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); window.escaped = true } })`)
+	panel.Page().Eval(`window.keep = true; addEventListener('keydown', e => { if (e.key === 'Escape' && window.keep) { e.preventDefault(); window.escaped = true } })`)
 	pressEscape(panel)
 	waitFor(t, panel, "window.escaped === true")
 	time.Sleep(300 * time.Millisecond)
@@ -81,8 +81,7 @@ func TestPanel(t *testing.T) {
 
 	// Without the listener, an Escape closes it.
 	off()
-	panel.Page().Eval(`location.reload()`)
-	waitFor(t, panel, "document.activeElement && document.activeElement.id === 'i'")
+	panel.Page().Eval(`window.keep = false`)
 	pressEscape(panel)
 	eventually(t, "the panel closed on Escape", panel.IsDestroyed)
 }
