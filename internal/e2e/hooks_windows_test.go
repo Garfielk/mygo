@@ -336,3 +336,8 @@ func pressEscape(*mygo.Window) bool {
 	mygo.RunOnMain(func() { win.TestPressKeys(0x1B) }) // VK_ESCAPE
 	return true
 }
+
+func panelStyles(w *mygo.Window) (tool, topmost, owned, supported bool) {
+	mygo.RunOnMain(func() { tool, topmost, owned = win.TestPanelStyles(w.NativeHandle()) })
+	return tool, topmost, owned, true
+}

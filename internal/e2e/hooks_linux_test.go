@@ -313,3 +313,6 @@ func axAttribute(*mygo.Window, string, string) (string, bool, bool, bool) {
 
 // pressEscape presses Escape, as the keyboard does.
 func pressEscape(*mygo.Window) bool { return pressKeys("Escape") }
+
+// Panels' window styles are Windows'.
+func panelStyles(*mygo.Window) (bool, bool, bool, bool) { return false, false, false, false }

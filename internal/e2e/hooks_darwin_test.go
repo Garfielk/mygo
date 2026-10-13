@@ -272,3 +272,6 @@ func pressEscape(*mygo.Window) bool {
 	mygo.RunOnMain(func() { darwin.TestAppKey(53, "\x1b") })
 	return true
 }
+
+// Panels' window styles are Windows'.
+func panelStyles(*mygo.Window) (bool, bool, bool, bool) { return false, false, false, false }
