@@ -36,6 +36,9 @@ func (ed *editor) wants(k keyEvent) bool {
 		}
 		return false
 	}
+	if ed.rich != nil && ed.rich.wants(ed, k) {
+		return true
+	}
 	switch k.key {
 	case KeyBackspace:
 		// Empty, a token field's input leaves it to take out a token.
@@ -164,6 +167,9 @@ func (ed *editor) vertical(lines int, extend bool) {
 var emacsKeys = map[Key]Key{KeyB: KeyLeft, KeyF: KeyRight, KeyP: KeyUp, KeyN: KeyDown, KeyH: KeyBackspace, KeyD: KeyDelete}
 
 func (ed *editor) key(c *context, st *state, k editEvent) {
+	if ed.rich != nil && ed.rich.key(ed, k) {
+		return
+	}
 	shift := k.mods&Shift != 0
 	m := k.mods &^ Shift
 	mac := runtime.GOOS == "darwin"
@@ -379,6 +385,9 @@ func (ed *editor) press(x, y float32, clicks, button int) {
 		return
 	}
 	ed.commitCompose()
+	if r := ed.rich; r != nil && ed.area != nil && r.pressed(ed, x-ed.originX, float64(y-ed.originY)+ed.area.scroll, clicks) {
+		return
+	}
 	p := ed.hitPosition(x, y)
 	i := p.Index
 	ed.dragging = true
@@ -407,7 +416,12 @@ func (ed *editor) press(x, y float32, clicks, button int) {
 	}
 }
 
-func (ed *editor) release() { ed.dragging = false }
+func (ed *editor) release() {
+	ed.dragging = false
+	if ed.rich != nil {
+		ed.rich.released(ed)
+	}
+}
 
 // laidOut reports whether a frame laid the editor's text out.
 func (ed *editor) laidOut() bool { return ed.layout != nil || ed.area != nil && ed.area.version != 0 }

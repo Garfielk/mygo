@@ -32,6 +32,12 @@ func (w *widgetTextInput) state() *state {
 
 func (w *widgetTextInput) publish() {
 	ed := w.ed
+	if ed.rich != nil {
+		ed.rich.publish(ed)
+		ed.rich.dirty = true
+		w.rt.blinkStart = time.Now()
+		return
+	}
 	if ed.document != nil {
 		if ed.buf.root != ed.published.root {
 			if !ed.bufferDirty {
@@ -63,6 +69,9 @@ func (w *widgetTextInput) publish() {
 func (w *widgetTextInput) prepare() {
 	if w.ed.document != nil {
 		w.ed.syncBuffer()
+	}
+	if w.ed.rich != nil {
+		w.ed.rich.sync(w.ed)
 	}
 	if w.processing || len(w.ed.queue) == 0 {
 		return
@@ -186,6 +195,9 @@ func (w *widgetTextInput) ReplaceText(r *TextInputRange, s string) {
 			ed.replace(ed.caret, ed.caret, s)
 		} else {
 			ed.insert(s)
+			if ed.rich != nil {
+				ed.rich.typed(ed, s)
+			}
 		}
 	} else {
 		wanted := platform.NormalizeTextRange(*r)
@@ -283,7 +295,7 @@ func (w *widgetTextInput) BoundsForRange(r TextInputRange) (Rect, TextInputRange
 		i = ed.displayIndex(ed.caret) + ed.composeCaret
 	}
 	var l *text.Layout
-	var y float32
+	var x0, y float32
 	local := i
 	if a := ed.area; a != nil {
 		base := i
@@ -297,7 +309,8 @@ func (w *widgetTextInput) BoundsForRange(r TextInputRange) (Rect, TextInputRange
 		if ed.compose != "" && p > ed.buf.para(ed.caret) {
 			local -= n
 		}
-		y = float32(a.hs.top(p) - a.scroll)
+		px, py := a.origin(ed, p)
+		x0, y = px, float32(py-a.scroll)
 	} else {
 		l = w.layout()
 	}
@@ -310,7 +323,7 @@ func (w *widgetTextInput) BoundsForRange(r TextInputRange) (Rect, TextInputRange
 		affinity = ed.caretAffinity
 	}
 	x, ly, h := l.CaretAt(text.CaretPosition{Index: local, Affinity: affinity})
-	b := Rect{X: ed.originX + x - ed.scrollX, Y: ed.originY + y + ly, W: 1, H: h}
+	b := Rect{X: ed.originX + x0 + x - ed.scrollX, Y: ed.originY + y + ly, W: 1, H: h}
 	actual := TextInputRange{Start: w.virtualUnits(i), End: w.virtualUnits(i)}
 	if r.End > r.Start && local < len(l.Runes) {
 		var boundaries text.Boundaries
@@ -318,7 +331,7 @@ func (w *widgetTextInput) BoundsForRange(r TextInputRange) (Rect, TextInputRange
 		end := min(boundaries.NextGrapheme(local), local+w.virtualRune(r.End)-i)
 		if rects := l.SelectionVisual(local, end, false); len(rects) > 0 {
 			q := rects[0]
-			b = Rect{X: ed.originX + q.X - ed.scrollX, Y: ed.originY + y + q.Y, W: q.W, H: q.H}
+			b = Rect{X: ed.originX + x0 + q.X - ed.scrollX, Y: ed.originY + y + q.Y, W: q.W, H: q.H}
 			actual.End = w.virtualUnits(i + end - local)
 		}
 	}

@@ -68,6 +68,11 @@ func (ed *editor) setText(s string) {
 // record starts a step of undo before an edit; typing in a row makes one
 // step.
 func (ed *editor) record(typing bool) {
+	if ed.rich != nil {
+		ed.rich.record(typing && ed.coalesce)
+		ed.coalesce = typing
+		return
+	}
 	now := time.Now()
 	if typing && ed.coalesce && now.Sub(ed.lastEdit) < time.Second && len(ed.undo) > 0 {
 		ed.lastEdit = now
@@ -94,6 +99,13 @@ func (ed *editor) replace(start, end int, s string) {
 			}
 			return r
 		}, s)
+	}
+	if ed.rich != nil {
+		ed.caret = ed.rich.replace(ed, start, end, s)
+		ed.anchor = ed.caret
+		ed.caretAffinity, ed.anchorAffinity = text.Downstream, text.Downstream
+		ed.visualSelection, ed.selected = false, nil
+		return
 	}
 	if n := len(ed.undo); n > 0 {
 		step := &ed.undo[n-1]
@@ -130,6 +142,10 @@ func (ed *editor) replace(start, end int, s string) {
 // takeBack undoes the last step of undo, or redoes the last undone with
 // redo.
 func (ed *editor) takeBack(redo bool) {
+	if ed.rich != nil {
+		ed.rich.takeBack(ed, redo)
+		return
+	}
 	from, to := &ed.undo, &ed.redo
 	if redo {
 		from, to = to, from
