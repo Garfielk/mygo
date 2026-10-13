@@ -213,12 +213,12 @@ size, so that a theme scales with it.
 
 `Block` replaces how any block shows: it is asked first for each block,
 and builds it when it returns true, from the document's blocks and
-inlines (see below):
+inlines (see [the parser](#the-parser)):
 
 ```go
-app.md.Block = func(c *ui.Context, d *markdown.Document, i int) bool {
+app.md.Block = func(c *ui.Context, d *parser.Document, i int) bool {
 	b := d.Block(i)
-	if b.Kind != markdown.ThematicBreak {
+	if b.Kind != parser.ThematicBreak {
 		return false
 	}
 	ui.Text(c, "⁂").TextAlign(ui.Center).AlignSelf(ui.Stretch)
@@ -236,7 +236,10 @@ with a Copy code button.
 
 ## The parser
 
-The parser stands alone: `Parse` reads a string, `Append` adds text and
+The parser is a package of its own, `ui/markdown/parser`, which
+imports nothing of ui, so that what only reads Markdown (a rich text
+editor importing it, a server rendering HTML) leaves the view out.
+`Parse` reads a string, `Append` adds text and
 `Edit` changes a range, each parsing again only what the change touches.
 An edit parses from the top-level block before it until a block starts,
 with nothing open, where one started before, from which it keeps the
@@ -245,11 +248,11 @@ A link defined later than where it is used makes the blocks using it
 parse their inlines again, and only those.
 
 ```go
-d := markdown.Parse(src)
+d := parser.Parse(src)
 d.Append(token)
 for i := range d.Children(0) { // the top-level blocks
 	b := d.Block(i)
-	if b.Kind == markdown.CodeBlock {
+	if b.Kind == parser.CodeBlock {
 		fmt.Println(b.Language(), d.Lines(i))
 	}
 }

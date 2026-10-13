@@ -3,9 +3,11 @@ package markdown
 import (
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // Copying: as text, a view joins its paragraphs with blank lines, a code
@@ -70,7 +72,7 @@ func (st *viewState) separator(a, b elemInfo) string {
 		return "\n"
 	}
 	ab, bb := d.Block(a.block), d.Block(b.block)
-	if ab.Kind == TableCell && bb.Kind == TableCell {
+	if ab.Kind == parser.TableCell && bb.Kind == parser.TableCell {
 		if ab.Parent == bb.Parent {
 			return "\t"
 		}
@@ -86,7 +88,7 @@ func (st *viewState) separator(a, b elemInfo) string {
 // listOf returns the nearest list around block i, or 0.
 func (st *viewState) listOf(i int) int {
 	for p := st.doc.Block(i).Parent; p > 0; p = st.doc.Block(p).Parent {
-		if st.doc.Block(p).Kind == List {
+		if st.doc.Block(p).Kind == parser.List {
 			return p
 		}
 	}
@@ -108,7 +110,7 @@ func (st *viewState) srcAt(inf elemInfo, r int, end bool) int {
 	d := st.doc
 	b := d.Block(inf.block)
 	switch b.Kind {
-	case CodeBlock, HTMLBlock, MathBlock:
+	case parser.CodeBlock, parser.HTMLBlock, parser.MathBlock:
 		// Lines from inf.line on, each followed by a newline.
 		n := d.LineCount(inf.block)
 		for k := max(inf.line, 0); k < n; k++ {
@@ -117,10 +119,10 @@ func (st *viewState) srcAt(inf elemInfo, r int, end bool) int {
 			if r <= c || k == n-1 {
 				// Spaces standing for a tab partly taken by indentation
 				// are not the source's.
-				pad := int(d.segs[int(b.segA)+k].pad)
+				pad := linePad(d.Source(), line, at)
 				off := at
-				for j := pad; j < r && off < len(d.src); j++ {
-					_, w := utf8.DecodeRuneInString(d.src[off:])
+				for j := pad; j < r && off < len(d.Source()); j++ {
+					_, w := utf8.DecodeRuneInString(d.Source()[off:])
 					off += w
 				}
 				return off
@@ -130,7 +132,7 @@ func (st *viewState) srcAt(inf elemInfo, r int, end bool) int {
 		return b.Start
 	}
 	if inf.block < len(st.paras) && st.paras[inf.block].ok {
-		return st.paras[inf.block].p.sourceAt(d.src, r, end)
+		return st.paras[inf.block].p.sourceAt(d.Source(), r, end)
 	}
 	return b.Start
 }
@@ -153,7 +155,7 @@ func (st *viewState) copyMarkdown(parts []ui.SelectedText) string {
 	b := st.srcAt(li, last.End, true)
 	atStart := first.Start == 0 && fi.line <= 0
 	atEnd := last.End >= utf8.RuneCountInString(last.Text)
-	if lb.Kind == CodeBlock && atEnd {
+	if lb.Kind == parser.CodeBlock && atEnd {
 		// Only the last chunk of lines ends the block.
 		atEnd = li.line+chunkLines >= d.LineCount(li.block)
 	}
@@ -162,37 +164,37 @@ func (st *viewState) copyMarkdown(parts []ui.SelectedText) string {
 	// fences when it is selected whole.
 	switch {
 	case !atStart:
-	case fb.Kind == TableCell:
+	case fb.Kind == parser.TableCell:
 		// A row's pipes go with it when cells after it are selected too.
 		if fi.block == fb.Parent+1 && li.block != fi.block {
-			a = lineStartOf(d.src, fb.Start)
+			a = lineStartOf(d.Source(), fb.Start)
 		}
-	case fb.Kind == CodeBlock:
+	case fb.Kind == parser.CodeBlock:
 		if fb.Fenced && atEnd && fi.block == li.block {
-			a = lineStartOf(d.src, fb.Start)
+			a = lineStartOf(d.Source(), fb.Start)
 		}
 	default:
-		a = lineStartOf(d.src, fb.Start)
+		a = lineStartOf(d.Source(), fb.Start)
 	}
 	switch {
 	case !atEnd:
-	case lb.Kind == TableCell:
+	case lb.Kind == parser.TableCell:
 		if lb.Next == d.Block(lb.Parent).Next && li.block != fi.block {
-			b = lineEndOf(d.src, lb.End)
+			b = lineEndOf(d.Source(), lb.End)
 		}
-	case lb.Kind == CodeBlock:
+	case lb.Kind == parser.CodeBlock:
 		if lb.Fenced && !lb.Open && atStart && fi.block == li.block {
 			b = lb.End
 		}
 	default:
-		b = lineEndOf(d.src, lb.End)
+		b = lineEndOf(d.Source(), lb.End)
 	}
 	if b < a {
 		a, b = b, a
 	}
 	prefix := st.openAt(fi.block, a)
 	suffix := st.closeAt(li.block, b)
-	return prefix + d.src[a:b] + suffix
+	return prefix + d.Source()[a:b] + suffix
 }
 
 func lineEndOf(src string, off int) int {
@@ -235,25 +237,25 @@ func (st *viewState) closeAt(i, at int) string {
 	return strings.Join(closes, "")
 }
 
-func (st *viewState) openSyntax(in []Inline, k int) string {
+func (st *viewState) openSyntax(in []parser.Inline, k int) string {
 	n := &in[k]
-	src := st.doc.src
+	src := st.doc.Source()
 	switch n.Kind {
-	case Emphasis, Strong, Strikethrough, Link:
+	case parser.Emphasis, parser.Strong, parser.Strikethrough, parser.Link:
 		if k+1 < n.Next {
 			return src[n.Start:in[k+1].Start]
 		}
-	case Code:
+	case parser.Code:
 		return src[n.Start:codeStart(src, n)]
 	}
 	return ""
 }
 
-func (st *viewState) closeSyntax(in []Inline, k int) string {
+func (st *viewState) closeSyntax(in []parser.Inline, k int) string {
 	n := &in[k]
-	src := st.doc.src
+	src := st.doc.Source()
 	switch n.Kind {
-	case Emphasis, Strong, Strikethrough, Link:
+	case parser.Emphasis, parser.Strong, parser.Strikethrough, parser.Link:
 		if k+1 < n.Next {
 			// The end of its last child.
 			end := in[k+1].End
@@ -262,9 +264,33 @@ func (st *viewState) closeSyntax(in []Inline, k int) string {
 			}
 			return src[end:n.End]
 		}
-	case Code:
+	case parser.Code:
 		ticks := codeStart(src, n) - n.Start
 		return src[n.End-ticks : n.End]
 	}
 	return ""
 }
+
+// linePad returns how many spaces a code line starts with that are not
+// the source's at, standing for a tab partly taken by indentation.
+func linePad(src, line string, at int) int {
+	pad := 0
+	for pad < len(line) && line[pad] == ' ' && !strings.HasPrefix(src[at:], line[pad:]) {
+		pad++
+	}
+	return pad
+}
+
+func lineStartOf(src string, off int) int {
+	for off > 0 && src[off-1] != '\n' && src[off-1] != '\r' {
+		off--
+	}
+	return off
+}
+
+// isEscapable reports whether a backslash escapes c: ASCII punctuation.
+func isEscapable(c byte) bool {
+	return c >= '!' && c <= '/' || c >= ':' && c <= '@' || c >= '[' && c <= '`' || c >= '{' && c <= '~'
+}
+
+func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }

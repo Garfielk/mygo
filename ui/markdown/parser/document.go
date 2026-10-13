@@ -1,4 +1,4 @@
-package markdown
+package parser
 
 import (
 	"iter"
@@ -198,6 +198,11 @@ func (b *Block) Language() string {
 // keep what they made of a block while it stays the same.
 func (b *Block) Revision() uint32 { return b.rev }
 
+// Healed reports whether the block's inlines were completed as the tail
+// of a streaming document: their closers are not in the source, and
+// change as it grows.
+func (b *Block) Healed() bool { return b.healed }
+
 // Document is Markdown parsed, which takes text appended to it, or edits,
 // and parses only what they change.
 type Document struct {
@@ -295,6 +300,13 @@ func (d *Document) reset() {
 
 // Source returns the text of the document.
 func (d *Document) Source() string { return d.src }
+
+// Footnote returns the FootnoteDefinition block of a label, as a
+// FootnoteRef's Text holds it.
+func (d *Document) Footnote(label string) (int, bool) {
+	i, ok := d.notes[normalizeLabel(label)]
+	return i, ok
+}
 
 // Extensions returns what the document reads beyond CommonMark.
 func (d *Document) Extensions() Extensions { return d.ext }

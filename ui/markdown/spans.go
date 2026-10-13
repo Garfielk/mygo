@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // A paragraph is the spans of its text, cut into pieces at its links,
@@ -52,10 +53,10 @@ type spanStyle struct {
 }
 
 type spanBuilder struct {
-	d     *Document
+	d     *parser.Document
 	th    *Theme
 	block int
-	in    []Inline
+	in    []parser.Inline
 	p     *para
 	cur   *piece
 	fade  func(src int) float32 // the opacity of text at a source offset, while revealing
@@ -129,7 +130,7 @@ func (sb *spanBuilder) add(text string, src, end int, exact bool, s spanStyle, l
 // each escape or entity, of its own, so that copying maps its runes to
 // the source's.
 func (sb *spanBuilder) addAligned(text string, src, end int, s spanStyle, link int) {
-	source := sb.d.src[src:end]
+	source := sb.d.Source()[src:end]
 	i, j := 0, 0 // in source and in text
 	run := 0     // where the run of the same bytes started, in text
 	flush := func() {
@@ -144,7 +145,7 @@ func (sb *spanBuilder) addAligned(text string, src, end int, s spanStyle, link i
 			sb.add(text[j:j+1], src+i, src+i+2, false, s, link)
 			i, j = i+2, j+1
 		case source[i] == '&' && entityAt(source, i, text[j:]) > 0:
-			n, lit := scanEntity(source, i)
+			n, lit := parser.Entity(source[i:])
 			flush()
 			sb.add(lit, src+i, src+i+n, false, s, link)
 			i, j = i+n, j+len(lit)
@@ -171,7 +172,7 @@ rest:
 // entityAt returns the length of the entity at i of source that text
 // starts with, decoded, or 0.
 func entityAt(source string, i int, text string) int {
-	n, lit := scanEntity(source, i)
+	n, lit := parser.Entity(source[i:])
 	if n == 0 || !strings.HasPrefix(text, lit) {
 		return 0
 	}
@@ -238,42 +239,42 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 	for k := from; k < to; k = in[k].Next {
 		n := &in[k]
 		switch n.Kind {
-		case Text:
-			if n.End-n.Start == len(n.Text) && sb.d.src[n.Start:n.End] == n.Text {
+		case parser.Text:
+			if n.End-n.Start == len(n.Text) && sb.d.Source()[n.Start:n.End] == n.Text {
 				sb.add(n.Text, n.Start, n.End, true, sb.htmlStyle(s), link)
 			} else {
 				sb.addAligned(n.Text, n.Start, n.End, sb.htmlStyle(s), link)
 			}
-		case SoftBreak:
+		case parser.SoftBreak:
 			sb.add(" ", n.Start, n.End, false, s, link)
-		case LineBreak:
+		case parser.LineBreak:
 			sb.add("\n", n.Start, n.End, false, s, link)
-		case Code:
+		case parser.Code:
 			cs := sb.htmlStyle(s)
 			cs.code = true
 			// The code's text is its source's bytes but for the spaces
 			// stripped at its ends and line endings as spaces.
-			a, z := codeStart(sb.d.src, n), n.End-(codeStart(sb.d.src, n)-n.Start)
-			if z-a == len(n.Text)+2 && sb.d.src[a] == ' ' {
+			a, z := codeStart(sb.d.Source(), n), n.End-(codeStart(sb.d.Source(), n)-n.Start)
+			if z-a == len(n.Text)+2 && sb.d.Source()[a] == ' ' {
 				a++
 			}
 			sb.add(n.Text, a, min(a+len(n.Text), z), z-a == len(n.Text), cs, link)
-		case Emphasis:
+		case parser.Emphasis:
 			cs := s
 			cs.italic = true
 			sb.inlines(k+1, n.Next, cs)
-		case Strong:
+		case parser.Strong:
 			cs := s
 			cs.weight = sb.th.StrongWeight
 			if cs.color.A == 0 && !cs.inLink && sb.th.Strong != sb.th.Text {
 				cs.color = sb.th.Strong
 			}
 			sb.inlines(k+1, n.Next, cs)
-		case Strikethrough:
+		case parser.Strikethrough:
 			cs := s
 			cs.strike = true
 			sb.inlines(k+1, n.Next, cs)
-		case Link:
+		case parser.Link:
 			if s.inLink {
 				sb.inlines(k+1, n.Next, s)
 				continue
@@ -285,29 +286,29 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 			sb.linkIndex = k
 			sb.inlines(k+1, n.Next, cs)
 			sb.linkIndex = save
-		case Image:
+		case parser.Image:
 			// Images within text show their description; a paragraph of
 			// images alone shows the images (see imagesOnly).
 			cs := s
 			cs.color = sb.th.Muted
-			alt := PlainText(in[k+1 : n.Next])
+			alt := parser.PlainText(in[k+1 : n.Next])
 			if alt == "" {
 				alt = "image"
 			}
 			sb.add("["+alt+"]", n.Start, n.End, false, cs, link)
-		case HTML:
+		case parser.HTML:
 			if !sb.inlineHTML(n.Text) {
 				sb.add(n.Text, n.Start, n.End, true, s, link)
 			}
-		case Math:
+		case parser.Math:
 			cs := s
 			cs.font = sb.th.CodeFont
 			cs.color = sb.th.Muted
 			if !cs.italic {
 				cs.size = sb.th.em(sb.th.CodeSize)
 			}
-			sb.add(n.Text, mathStart(sb.d.src, n), n.End, false, cs, link)
-		case FootnoteRef:
+			sb.add(n.Text, mathStart(sb.d.Source(), n), n.End, false, cs, link)
+		case parser.FootnoteRef:
 			cs := s
 			cs.sub = true
 			cs.color = sb.th.Link
@@ -325,7 +326,7 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 }
 
 // codeStart returns where a code span's text starts in the source.
-func codeStart(src string, n *Inline) int {
+func codeStart(src string, n *parser.Inline) int {
 	i := n.Start
 	for i < n.End && src[i] == '`' {
 		i++
@@ -333,7 +334,7 @@ func codeStart(src string, n *Inline) int {
 	return i
 }
 
-func mathStart(src string, n *Inline) int {
+func mathStart(src string, n *parser.Inline) int {
 	i := n.Start
 	for i < n.End && (src[i] == '$' || src[i] == '\\' || src[i] == '(' || src[i] == '[') && i-n.Start < 2 {
 		i++
@@ -410,14 +411,14 @@ func (sb *spanBuilder) htmlStyle(s spanStyle) spanStyle {
 
 // imagesOnly reports whether the inlines are images, and the spaces
 // between them, alone: a paragraph showing them as images.
-func imagesOnly(in []Inline) bool {
+func imagesOnly(in []parser.Inline) bool {
 	n := 0
 	for k := 0; k < len(in); k = in[k].Next {
 		switch in[k].Kind {
-		case Image:
+		case parser.Image:
 			n++
-		case SoftBreak, LineBreak:
-		case Text:
+		case parser.SoftBreak, parser.LineBreak:
+		case parser.Text:
 			if strings.TrimSpace(in[k].Text) != "" {
 				return false
 			}

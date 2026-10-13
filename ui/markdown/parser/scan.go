@@ -1,4 +1,4 @@
-package markdown
+package parser
 
 import (
 	"html"
@@ -483,6 +483,11 @@ func unescapeString(s string) string {
 	}
 	return b.String()
 }
+
+// Entity reads the entity or numeric character reference s starts with,
+// as &amp; or &#35;, returning its length and the text it stands for, or
+// 0 when s starts with none that Markdown reads.
+func Entity(s string) (n int, text string) { return scanEntity(s, 0) }
 
 // scanEntity reads an entity or a numeric character reference at i,
 // returning its length and its text, or 0.

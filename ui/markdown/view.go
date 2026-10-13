@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // Options are how views show Markdown: their theme, what links and images
@@ -16,7 +17,7 @@ type Options struct {
 	// whose values those the theme leaves zero take.
 	Theme *Theme
 	// Extensions is the syntax read beyond CommonMark: Default when zero.
-	Extensions Extensions
+	Extensions parser.Extensions
 
 	// OnLink, when set, handles a click on a link, given its destination.
 	// Without it, links to http, https and mailto addresses open as a
@@ -47,7 +48,7 @@ type Options struct {
 	HTML func(c *ui.Context, html string)
 	// Block, when set, is asked first for each block, and builds it in
 	// its place when it returns true.
-	Block func(c *ui.Context, d *Document, i int) bool
+	Block func(c *ui.Context, d *parser.Document, i int) bool
 
 	// Reveal is how Stream shows text as it comes: DefaultReveal when nil.
 	Reveal *Reveal
@@ -93,8 +94,8 @@ type stateKey struct{}
 // viewState is what a view keeps from frame to frame.
 type viewState struct {
 	o     *Options
-	doc   *Document
-	ext   Extensions
+	doc   *parser.Document
+	ext   parser.Extensions
 	uiTh  ui.Theme
 	def   *Theme
 	th    Theme
@@ -114,7 +115,7 @@ type viewState struct {
 
 type paraCache struct {
 	start, end int
-	kind       Kind
+	kind       parser.Kind
 	rev        uint32
 	base       spanStyle
 	ok         bool
@@ -138,10 +139,10 @@ func build(c *ui.Context, src string, o *Options, streaming bool) ui.Element {
 	st.o = o
 	ext := o.Extensions
 	if ext == 0 {
-		ext = Default
+		ext = parser.Default
 	}
 	if st.doc == nil || st.ext != ext {
-		st.doc, st.ext = New(ext), ext
+		st.doc, st.ext = parser.New(ext), ext
 		st.paras = st.paras[:0]
 	}
 	st.theme(c)
@@ -226,7 +227,7 @@ func (st *viewState) blocks(c *ui.Context, parent int, tight bool, base spanStyl
 	prevHeading := 0
 	for j := parent + 1; j < d.Block(parent).Next; j = d.Block(j).Next {
 		b := d.Block(j)
-		if b.Kind == FootnoteDefinition {
+		if b.Kind == parser.FootnoteDefinition {
 			continue
 		}
 		top := float32(0)
@@ -238,7 +239,7 @@ func (st *viewState) blocks(c *ui.Context, parent int, tight bool, base spanStyl
 			if prevHeading > 0 {
 				top = th.em(th.Headings[prevHeading-1].Bottom)
 			}
-			if b.Kind == Heading {
+			if b.Kind == parser.Heading {
 				top = max(top, th.em(th.Headings[b.Level-1].Top))
 			}
 		}
@@ -252,7 +253,7 @@ func (st *viewState) blocks(c *ui.Context, parent int, tight bool, base spanStyl
 			st.scrollTo = -1
 		}
 		prevHeading = 0
-		if b.Kind == Heading {
+		if b.Kind == parser.Heading {
 			prevHeading = b.Level
 		}
 		first = false
@@ -284,12 +285,12 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 	th := &st.th
 	b := d.Block(i)
 	switch b.Kind {
-	case Paragraph:
+	case parser.Paragraph:
 		if imagesOnly(d.Inlines(i)) {
 			return st.images(c, i)
 		}
 		return st.paragraph(c, i, base)
-	case Heading:
+	case parser.Heading:
 		h := th.Headings[b.Level-1]
 		s := base
 		s.weight, s.size, s.color = h.Weight, th.em(h.Size), h.Color
@@ -298,11 +299,11 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 			el.BorderWidth(0, 0, 1, 0).BorderColor(th.Rule).Padding(0, 0, th.em(0.3), 0)
 		}
 		return el
-	case ThematicBreak:
+	case parser.ThematicBreak:
 		return ui.Box(c).Height(1).Background(th.Rule).AlignSelf(ui.Stretch).Margin(th.em(0.25), 0)
-	case CodeBlock:
+	case parser.CodeBlock:
 		return st.codeBlock(c, i)
-	case HTMLBlock:
+	case parser.HTMLBlock:
 		html := strings.TrimRight(d.Lines(i), "\n")
 		if st.o.HTML != nil {
 			box := ui.Column(c)
@@ -311,7 +312,7 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 		el := ui.Text(c, html).Font(th.CodeFont).FontSize(th.em(th.CodeSize)).TextColor(th.Muted)
 		st.note(el.ID(), i, 0)
 		return el
-	case MathBlock:
+	case parser.MathBlock:
 		tex := strings.TrimRight(d.Lines(i), "\n")
 		if st.o.Math != nil {
 			box := ui.Column(c)
@@ -322,14 +323,14 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 			el := ui.Text(c, tex).Font(th.CodeFont).FontSize(th.em(th.CodeSize)).TextColor(th.Muted).NoWrap().Margin(0, ui.Auto)
 			st.note(el.ID(), i, 0)
 		})
-	case Quote:
+	case parser.Quote:
 		s := base
 		s.color = th.QuoteText
 		q := ui.Column(c).BorderWidth(0, 0, 0, th.QuoteBarWidth).BorderColor(th.QuoteBar).Padding(0, 0, 0, th.em(0.85)).TextColor(th.QuoteText)
 		return q.Children(func() { st.blocks(c, i, false, s) })
-	case List:
+	case parser.List:
 		return st.list(c, i, base)
-	case Table:
+	case parser.Table:
 		return st.table(c, i, base)
 	}
 	return ui.Box(c)
@@ -338,12 +339,12 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 // fadeIn fades in a block revealed a moment ago: text fades by its
 // spans, and the rest of blocks, as a code block's box or a table's
 // lines, by their opacity.
-func (st *viewState) fadeIn(el ui.Element, b *Block) {
+func (st *viewState) fadeIn(el ui.Element, b *parser.Block) {
 	if st.fade == nil {
 		return
 	}
 	switch b.Kind {
-	case Paragraph, Heading, List:
+	case parser.Paragraph, parser.Heading, parser.List:
 		return
 	}
 	if a := st.fade(b.Start); a < 1 {
@@ -361,10 +362,10 @@ func (st *viewState) para(i int, base spanStyle) *para {
 	st.doc.Inlines(i) // their revision
 	pc := &st.paras[i]
 	fading := st.fade != nil && st.fade(max(b.End-1, b.Start)) < 1
-	if pc.ok && pc.start == b.Start && pc.end == b.End && pc.kind == b.Kind && pc.rev == b.rev && pc.base == base && !pc.p.fading && !fading && !b.healed {
+	if pc.ok && pc.start == b.Start && pc.end == b.End && pc.kind == b.Kind && pc.rev == b.Revision() && pc.base == base && !pc.p.fading && !fading && !b.Healed() {
 		return &pc.p
 	}
-	pc.start, pc.end, pc.kind, pc.rev, pc.base, pc.ok = b.Start, b.End, b.Kind, b.rev, base, true
+	pc.start, pc.end, pc.kind, pc.rev, pc.base, pc.ok = b.Start, b.End, b.Kind, b.Revision(), base, true
 	sb := &st.sb
 	sb.block = i
 	sb.fade = st.fade
@@ -409,7 +410,7 @@ func (st *viewState) piece(c *ui.Context, block int, pc *piece) {
 		l := ui.Link(c, "", "")
 		l.Children(func() { ui.RichText(c, pc.spans...) })
 		if l.Clicked() {
-			if i, ok := st.doc.notes[normalizeLabel(in.Text)]; ok {
+			if i, ok := st.doc.Footnote(in.Text); ok {
 				st.scrollTo = i
 			}
 		}
@@ -420,7 +421,7 @@ func (st *viewState) piece(c *ui.Context, block int, pc *piece) {
 }
 
 // link builds a link to in.Dest whose text children builds.
-func (st *viewState) link(c *ui.Context, in *Inline, children func()) {
+func (st *viewState) link(c *ui.Context, in *parser.Inline, children func()) {
 	dest := in.Dest
 	var l ui.Element
 	switch {
@@ -474,7 +475,7 @@ func linkAllowed(dest string, router bool) bool {
 func (st *viewState) headingNamed(name string) int {
 	d := st.doc
 	for i := 1; i < d.Len(); i++ {
-		if d.Block(i).Kind == Heading && Slug(PlainText(d.Inlines(i))) == strings.ToLower(name) {
+		if d.Block(i).Kind == parser.Heading && Slug(parser.PlainText(d.Inlines(i))) == strings.ToLower(name) {
 			return i
 		}
 	}
@@ -503,7 +504,7 @@ func (st *viewState) list(c *ui.Context, i int, base spanStyle) ui.Element {
 	b := d.Block(i)
 	depth := 0
 	for p := b.Parent; p > 0; p = d.Block(p).Parent {
-		if d.Block(p).Kind == List {
+		if d.Block(p).Kind == parser.List {
 			depth++
 		}
 	}
@@ -547,7 +548,7 @@ func (st *viewState) countChildren(i int) int {
 }
 
 // marker builds an item's marker: a bullet, its number, or its check box.
-func (st *viewState) marker(c *ui.Context, list, item *Block, n, depth int, width float32) {
+func (st *viewState) marker(c *ui.Context, list, item *parser.Block, n, depth int, width float32) {
 	th := &st.th
 	box := ui.Row(c).Width(width).Shrink(0).Unselectable()
 	if st.fade != nil {
@@ -557,10 +558,10 @@ func (st *viewState) marker(c *ui.Context, list, item *Block, n, depth int, widt
 	}
 	box.Children(func() {
 		switch {
-		case item.Task != NoTask:
+		case item.Task != parser.NoTask:
 			size := th.em(0.95)
 			lineH := th.FontSize * th.LineHeight * 1.2
-			checked := item.Task == Checked
+			checked := item.Task == parser.Checked
 			cb := ui.Box(c).Size(size, size).Radius(max(3, size/5)).Margin(max(0, (lineH-size)/2-1), 0, 0, 0).Role(ui.RoleCheckBox).Checked(checked)
 			if checked {
 				cb.Background(th.Checkbox).Draw(func(p *ui.Painter, r ui.Rect) {
@@ -587,11 +588,11 @@ func (st *viewState) numberNotes() {
 	clear(st.notes)
 	n := 0
 	for i := 1; i < st.doc.Len(); i++ {
-		if b := st.doc.Block(i); b.Kind == FootnoteDefinition {
+		if b := st.doc.Block(i); b.Kind == parser.FootnoteDefinition {
 			if st.notes == nil {
 				st.notes = map[string]int{}
 			}
-			key := normalizeLabel(b.info)
+			key := parser.NormalizeLabel(b.Label())
 			if _, ok := st.notes[key]; !ok {
 				n++
 				st.notes[key] = n
@@ -600,7 +601,7 @@ func (st *viewState) numberNotes() {
 	}
 }
 
-func (st *viewState) noteNumber(label string) int { return st.notes[normalizeLabel(label)] }
+func (st *viewState) noteNumber(label string) int { return st.notes[parser.NormalizeLabel(label)] }
 
 // footnotes builds the footnotes, below a rule, in order.
 func (st *viewState) footnotes(c *ui.Context) {
@@ -613,10 +614,10 @@ func (st *viewState) footnotes(c *ui.Context) {
 	base := spanStyle{color: th.Muted, size: th.em(0.875)}
 	for i := 1; i < d.Len(); i++ {
 		b := d.Block(i)
-		if b.Kind != FootnoteDefinition {
+		if b.Kind != parser.FootnoteDefinition {
 			continue
 		}
-		num := st.notes[normalizeLabel(b.info)]
+		num := st.notes[parser.NormalizeLabel(b.Label())]
 		row := ui.Row(c).AlignItems(ui.Start).Margin(th.em(0.25), 0, 0, 0)
 		if st.scrollTo == i {
 			row.ScrollIntoView()

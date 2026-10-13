@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // imageEntry is an image loading or loaded.
@@ -73,10 +74,10 @@ func (st *viewState) images(c *ui.Context, i int) ui.Element {
 	return row.Children(func() {
 		for k := 0; k < len(in); k = in[k].Next {
 			n := &in[k]
-			if n.Kind != Image {
+			if n.Kind != parser.Image {
 				continue
 			}
-			alt := PlainText(in[k+1 : n.Next])
+			alt := parser.PlainText(in[k+1 : n.Next])
 			src := st.image(c, n.Dest)
 			if src == nil || n.Pending {
 				label := alt

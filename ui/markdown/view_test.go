@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -89,10 +90,19 @@ func TestViewCopyMarkdownPartial(t *testing.T) {
 	}
 }
 
+// testdata returns a document of the parser's tests.
+func testdata(t testing.TB, name string) string {
+	b, err := os.ReadFile("parser/testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
 // TestStreamMatchesView streams a document a character at a time into
 // Stream and checks it shows as View shows it whole.
 func TestStreamMatchesView(t *testing.T) {
-	src := corpus(t)[1]
+	src := testdata(t, "extras.md")
 	o := &Options{Reveal: &Reveal{Unit: AtOnce}}
 	var text string
 	done := false

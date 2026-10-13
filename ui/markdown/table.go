@@ -1,6 +1,9 @@
 package markdown
 
-import "github.com/egoist/mygo/ui"
+import (
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
+)
 
 // tableState keeps a table's column widths, which only grow while the
 // table is being written, so that its columns do not jump as its cells
@@ -98,9 +101,9 @@ func (st *viewState) table(c *ui.Context, i int, base spanStyle) ui.Element {
 						}
 						align := ui.Start
 						switch b.Align[k] {
-						case AlignCenter:
+						case parser.AlignCenter:
 							align = ui.Center
-						case AlignRight:
+						case parser.AlignRight:
 							align = ui.End
 						}
 						box.Children(func() { st.paragraph(c, cell, s).TextAlign(align) })

@@ -1,4 +1,4 @@
-package markdown
+package parser
 
 import (
 	"math/rand/v2"
@@ -8,72 +8,20 @@ import (
 	"unicode/utf8"
 )
 
-// extras exercises what the spec examples do not: footnotes, math,
-// definitions after their links, task lists, tables streaming.
-const extras = `# Notes on streaming
-
-Text with a footnote[^1] and another[^note], math $$e^{i\pi}+1=0$$ and \(a^2\),
-and a [link defined later][later] with *emphasis*, **strong**, ~~struck~~ and ` + "`code`" + `.
-
-$$
-\int_0^1 x^2\,dx = \frac{1}{3}
-$$
-
-\[
-a + b
-\]
-
-- [ ] a task
-- [x] a done task
-  continued lazily
-
-| a | b |
-|---|:-:|
-| 1 | 2 |
-| 3 | 4 |
-
-> A quote
-with a lazy line
-> - and a list
->   inside
-
-1. one
-2. two
-
-   still two
-
-3) three
-10. ten
-
-` + "```go" + `
-func main() {
-	fmt.Println("hi")
-}
-` + "```" + `
-
-    indented code
-
-<div>
-raw <b>HTML</b>
-</div>
-
-Setext heading
---------------
-
-Visit www.example.com, https://example.com/a_(b) or mail someone@example.com.
-
-[later]: https://example.com/later "Later"
-[^1]: The footnote.
-[^note]: A footnote
-    of two lines.
-`
-
+// corpus returns the documents streamed in tests: an answer of a
+// language model, and extras.md, which exercises what the spec examples
+// do not (footnotes, math, definitions after their links, task lists,
+// tables streaming).
 func corpus(t testing.TB) []string {
-	llm, err := os.ReadFile("testdata/llm.md")
-	if err != nil {
-		t.Fatal(err)
+	var docs []string
+	for _, name := range []string{"testdata/llm.md", "testdata/extras.md"} {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs = append(docs, string(b))
 	}
-	return []string{string(llm), extras}
+	return docs
 }
 
 // TestAppendMatchesWhole appends documents a character at a time and

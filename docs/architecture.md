@@ -2163,7 +2163,10 @@ either.
     are built by the diff view across both sides, over the room their
     blocks leave.
 - **Markdown** (`ui/markdown`), on ui's public API as `ui/editor` is, whose
-  tokenizers highlight its code. The parser follows cmark-gfm's two
+  tokenizers highlight its code. The parser, `ui/markdown/parser`,
+  imports nothing of ui, so that `ui/richtext` reads Markdown without the
+  view; the view reaches it through its exported methods only
+  (`Source`, `Footnote`, `Block.Revision` and `Healed`). It follows cmark-gfm's two
   phases over flat blocks and inlines with byte offsets: a block parser
   with a stack of open blocks, line by line, closing those a line does not
   match before adding a block, so that blocks go in document order; and

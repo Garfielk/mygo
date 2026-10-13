@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // rvView builds a View of *src and returns its tester and a getter of its
@@ -225,7 +226,7 @@ func TestReviewCopyMarkdownTableCell(t *testing.T) {
 	st := get()
 	var cell int
 	for i := 1; i < st.doc.Len(); i++ {
-		if st.doc.Block(i).Kind == TableCell && st.doc.src[st.doc.Block(i).Start:st.doc.Block(i).End] == "1" {
+		if st.doc.Block(i).Kind == parser.TableCell && st.doc.Source()[st.doc.Block(i).Start:st.doc.Block(i).End] == "1" {
 			cell = i
 		}
 	}
@@ -243,7 +244,7 @@ func TestReviewCopyMarkdownCodeTab(t *testing.T) {
 	st := get()
 	var code int
 	for i := 1; i < st.doc.Len(); i++ {
-		if st.doc.Block(i).Kind == CodeBlock {
+		if st.doc.Block(i).Kind == parser.CodeBlock {
 			code = i
 		}
 	}

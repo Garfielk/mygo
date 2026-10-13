@@ -1,4 +1,4 @@
-package markdown
+package parser
 
 import (
 	"slices"
@@ -1166,6 +1166,10 @@ func (ip *inlineParser) parseLinkTitle() (string, bool) {
 	}
 	return "", false
 }
+
+// NormalizeLabel normalizes a label as CommonMark matches link
+// references and footnotes: whitespace collapsed and case folded.
+func NormalizeLabel(s string) string { return normalizeLabel(s) }
 
 // normalizeLabel normalizes a link label for matching: whitespace
 // collapsed and case folded.
