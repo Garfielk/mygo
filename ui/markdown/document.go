@@ -231,7 +231,7 @@ type Document struct {
 	healedAt int
 	// revs counts the inlines parsed, to give each a Revision of its own.
 	revs uint32
-	inp      inlineParser
+	inp  inlineParser
 }
 
 type oldInline struct {
