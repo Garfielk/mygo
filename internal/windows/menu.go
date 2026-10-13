@@ -309,10 +309,7 @@ func editRole(w *window, role string) bool {
 		return editRole(v, role)
 	}
 	if w.surface != nil {
-		if role == "pasteAndMatchStyle" {
-			role = "paste"
-		}
-		if _, ok := commands[role]; !ok && role != "paste" {
+		if _, ok := commands[role]; !ok && role != "paste" && role != "pasteAndMatchStyle" {
 			return false
 		}
 		w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: role})

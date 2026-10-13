@@ -269,3 +269,16 @@ func TestRichTextAppCommands(t *testing.T) {
 		t.Fatalf("runs %q", got)
 	}
 }
+
+func TestRichTextFormatMenu(t *testing.T) {
+	doc := NewDocument(NewText("one two"))
+	tt, _ := richTester(t, doc)
+	doc.SetSelection(0, 3)
+	tt.Frame()
+	tt.Command("bold")
+	tt.Command("alignCenter")
+	at := doc.Text()
+	if runsOf(at) != "*one*| two" || at.ParagraphStyleAt(0).Align != ui.Center {
+		t.Fatalf("%q %+v", runsOf(at), at.ParagraphStyleAt(0))
+	}
+}

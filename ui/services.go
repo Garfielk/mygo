@@ -44,6 +44,7 @@ func (s Services) WriteClipboard(text string) {
 		rt.host.writeClipboard(text)
 	}
 }
+
 // ReadClipboardData reads the clipboard's representations of formats, as
 // a rich text editor reads its own format, HTML and plain text to paste
 // the richest it understands; nil formats read all. A clipboard without

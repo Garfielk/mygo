@@ -60,6 +60,16 @@ const (
 	RoleEditMenu           MenuRole = "editMenu"      // default Edit menu
 	RoleViewMenu           MenuRole = "viewMenu"      // default View menu
 	RoleWindowMenu         MenuRole = "windowMenu"    // default Window menu
+	// The Format menu's roles format the selection of a rich text editor
+	// of native UI (ui/richtext), or of an editable web page.
+	RoleBold          MenuRole = "bold"
+	RoleItalic        MenuRole = "italic"
+	RoleUnderline     MenuRole = "underline"
+	RoleStrikethrough MenuRole = "strikethrough"
+	RoleAlignLeft     MenuRole = "alignLeft"
+	RoleAlignCenter   MenuRole = "alignCenter"
+	RoleAlignRight    MenuRole = "alignRight"
+	RoleFormatMenu    MenuRole = "formatMenu" // default Format menu
 )
 
 // MenuItem is an entry of a Menu. Fill in the exported fields to build a
@@ -509,12 +519,25 @@ func performRole(role MenuRole, win *Window) {
 	case RoleUndo, RoleRedo, RoleCut, RoleCopy, RolePaste, RoleDelete, RoleSelectAll, RolePasteAndMatchStyle:
 		cmd := map[MenuRole]string{
 			RoleUndo: "undo", RoleRedo: "redo", RoleCut: "cut", RoleCopy: "copy", RolePaste: "paste",
-			RoleDelete: "delete", RoleSelectAll: "selectAll", RolePasteAndMatchStyle: "paste",
+			RoleDelete: "delete", RoleSelectAll: "selectAll", RolePasteAndMatchStyle: "pasteAndMatchStyle",
 		}[role]
 		if win.content != nil {
 			win.contentCommand(cmd)
 			return
 		}
+		if role == RolePasteAndMatchStyle {
+			cmd = "paste"
+		}
+		n.Eval("document.execCommand(" + `"` + cmd + `"` + ")")
+	case RoleBold, RoleItalic, RoleUnderline, RoleStrikethrough, RoleAlignLeft, RoleAlignCenter, RoleAlignRight:
+		if win.content != nil {
+			win.contentCommand(string(role))
+			return
+		}
+		cmd := map[MenuRole]string{
+			RoleBold: "bold", RoleItalic: "italic", RoleUnderline: "underline", RoleStrikethrough: "strikeThrough",
+			RoleAlignLeft: "justifyLeft", RoleAlignCenter: "justifyCenter", RoleAlignRight: "justifyRight",
+		}[role]
 		n.Eval("document.execCommand(" + `"` + cmd + `"` + ")")
 	}
 }
@@ -610,6 +633,31 @@ func roleDefaults(r MenuRole) (label, accel string) {
 		return "Edit", ""
 	case RoleViewMenu:
 		return "View", ""
+	case RoleFormatMenu:
+		return "Format", ""
+	case RoleBold:
+		return "Bold", "CmdOrCtrl+B"
+	case RoleItalic:
+		return "Italic", "CmdOrCtrl+I"
+	case RoleUnderline:
+		return "Underline", "CmdOrCtrl+U"
+	case RoleStrikethrough:
+		return "Strikethrough", "Shift+CmdOrCtrl+X"
+	case RoleAlignLeft:
+		if mac {
+			return "Align Left", "Cmd+{"
+		}
+		return "Align Left", "Ctrl+L"
+	case RoleAlignCenter:
+		if mac {
+			return "Center", "Cmd+|"
+		}
+		return "Center", "Ctrl+E"
+	case RoleAlignRight:
+		if mac {
+			return "Align Right", "Cmd+}"
+		}
+		return "Align Right", "Ctrl+R"
 	}
 	return string(r), ""
 }
@@ -657,6 +705,17 @@ func roleSubmenu(r MenuRole) []*MenuItem {
 			)
 		}
 		return append(items, &MenuItem{Role: RoleDelete}, Separator(), &MenuItem{Role: RoleSelectAll})
+	case RoleFormatMenu:
+		return []*MenuItem{
+			{Role: RoleBold},
+			{Role: RoleItalic},
+			{Role: RoleUnderline},
+			{Role: RoleStrikethrough},
+			Separator(),
+			{Role: RoleAlignLeft},
+			{Role: RoleAlignCenter},
+			{Role: RoleAlignRight},
+		}
 	case RoleViewMenu:
 		return []*MenuItem{
 			{Role: RoleReload},

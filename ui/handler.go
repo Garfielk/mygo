@@ -18,8 +18,10 @@ const (
 	// at rune Caret; an empty Text ends it.
 	InputCompose
 	// InputCommand is an edit command of the menus, such as Copy of the
-	// Edit menu: "copy", "cut", "paste", "selectAll", "undo", "redo" or
-	// "delete".
+	// Edit menu: "copy", "cut", "paste", "pasteAndMatchStyle",
+	// "selectAll", "undo", "redo" or "delete", or one of the Format menu,
+	// as Bold: "bold", "italic", "underline", "strikethrough",
+	// "alignLeft", "alignCenter" or "alignRight".
 	InputCommand
 	// InputPointerDown and InputPointerUp report Button pressed or
 	// released at X, Y, with Clicks the count of quick successive presses

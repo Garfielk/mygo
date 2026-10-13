@@ -84,9 +84,6 @@ func initMenuCallbacks() {
 			} else if w != nil {
 				if w.surface != nil {
 					role := itemRoles[id]
-					if role == "pasteAndMatchStyle" {
-						role = "paste"
-					}
 					w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: role})
 				} else {
 					webkitWebViewExecuteEditingCommand(w.web, cs(cmd))

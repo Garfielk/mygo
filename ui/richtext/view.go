@@ -147,15 +147,15 @@ const (
 // runs, style and composition it was made of, the UTF-16 offset of each of
 // its runes, and its height with the room around it, 0 until laid out.
 type paraView struct {
-	layout   *ui.TextLayout
-	units    []int
-	id       uint64
-	runs     *attrRun
-	nruns    int
-	style    ParagraphStyle
-	compose  string
-	at       int
-	h        float32
+	layout  *ui.TextLayout
+	units   []int
+	id      uint64
+	runs    *attrRun
+	nruns   int
+	style   ParagraphStyle
+	compose string
+	at      int
+	h       float32
 }
 
 // look is how the text of an editor looks: its font and the theme's

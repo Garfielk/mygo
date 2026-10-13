@@ -528,7 +528,8 @@ func (t *Tester) Compose(text string, caret int) {
 }
 
 // Command performs an edit command of the menus, as Copy of the Edit menu:
-// "copy", "cut", "paste", "selectAll", "undo", "redo" or "delete".
+// "copy", "cut", "paste", "pasteAndMatchStyle", "selectAll", "undo",
+// "redo" or "delete", or a Format menu's, as "bold" or "alignCenter".
 func (t *Tester) Command(name string) {
 	t.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
 }
