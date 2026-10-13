@@ -23,6 +23,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/richtext"
 )
 
 type gallery struct {
@@ -113,10 +114,10 @@ type gallery struct {
 	stars               int
 	battery, quality    float64
 	priceLow, priceHigh float64
+	// The note of the Rich Text page.
+	note *richtext.Document
 	// The grid of swatches, the one last chosen, those chosen, and their
 	// order; the tasks dragged between two columns.
-	// The note of the Rich Text page.
-	note           *ui.RichTextDocument
 	swatches       ui.GridState
 	swatch         int
 	swatchesChosen ui.Selection[int]

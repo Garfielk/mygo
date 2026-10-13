@@ -1420,42 +1420,6 @@ func RichText(c *Context, spans ...Span) Element {
 	return wrapElement(coreRichText(_ctx, spans...))
 }
 
-// RichTextEditor creates an editor of the attributed text of doc, as
-// NSTextView edits attributed text: bold, italic, underline,
-// strikethrough, code, fonts, sizes and colors, links, headings, lists,
-// quotations, blocks of code, alignment and attachments, with the
-// shortcuts of word processors (⌘B, ⌘I, ⌘U, ⌘K, ⇧⌘7, ⇧⌘8, ⌘], …), undo
-// of formats with text, rich copy and paste, and input methods composing
-// in the typing attributes. The app keeps doc from frame to frame:
-//
-//	doc := ui.NewRichTextDocument(ui.NewAttributedText("Hello"))
-//	// In the view:
-//	if ui.RichTextEditor(c, doc).Fill().Changed() {
-//		app.save(doc.Text())
-//	}
-//
-// A toolbar formats the selection through doc (doc.ToggleBold,
-// doc.SetHeading, …) and shows its formats with doc.Formatting. Changed
-// reports the edits the user made in the editor, not those the app made
-// through doc.
-func RichTextEditor(c *Context, doc *RichTextDocument) Element {
-	_ctx := c.build()
-	if _ctx == nil {
-		return Element{}
-	}
-	return wrapElement(coreRichTextEditor(_ctx, doc))
-}
-
-// RichTextEditorBase creates a RichTextEditor without padding, background,
-// border or corners.
-func RichTextEditorBase(c *Context, doc *RichTextDocument) Element {
-	_ctx := c.build()
-	if _ctx == nil {
-		return Element{}
-	}
-	return wrapElement(coreRichTextEditorBase(_ctx, doc))
-}
-
 // Row creates a container that lays its children out from left to right,
 // centered vertically.
 func Row(c *Context) Element {
@@ -3858,22 +3822,6 @@ func (_handle Element) MarginY(v float32) Element {
 	return wrapElement(_node.MarginY(v))
 }
 
-// MarkdownShortcuts turns Markdown typed in a RichTextEditor into formats,
-// as it is by default: "# " at the start of a paragraph makes a heading,
-// "- " or "* " a bulleted list, "1. " a numbered one, "[ ] " a task, "> "
-// a quotation and "```" a block of code; **bold**, *italic*, `code` and
-// ~~strikethrough~~ format what they hold as the closing mark is typed.
-// Undo takes a shortcut back to what was typed.
-func (_handle Element) MarkdownShortcuts(on bool) Element {
-	_node := _handle.node()
-	if _node == nil {
-		return Element{}
-	}
-	_ctx := _node.c
-	_ = _ctx
-	return wrapElement(_node.MarkdownShortcuts(on))
-}
-
 func (_handle Element) MaxHeight(v float32) Element {
 	_node := _handle.node()
 	if _node == nil {
@@ -4059,31 +4007,6 @@ func (_handle Element) OnEnter(fn func(e Enter) bool) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.OnEnter(fn))
-}
-
-// OnLink has fn open the URL of a link clicked in a RichTextEditor,
-// instead of the system opening it.
-func (_handle Element) OnLink(fn func(url string)) Element {
-	_node := _handle.node()
-	if _node == nil {
-		return Element{}
-	}
-	_ctx := _node.c
-	_ = _ctx
-	return wrapElement(_node.OnLink(fn))
-}
-
-// OnLinkCommand has fn run for ⌘K (Ctrl+K) in a RichTextEditor, as an app
-// asks for the URL of a link in a popover and sets it with
-// RichTextDocument.SetLink. Without it, ⌘K links a selected URL to itself.
-func (_handle Element) OnLinkCommand(fn func()) Element {
-	_node := _handle.node()
-	if _node == nil {
-		return Element{}
-	}
-	_ctx := _node.c
-	_ = _ctx
-	return wrapElement(_node.OnLinkCommand(fn))
 }
 
 // OnPaste has fn see a paste into a text input, by Cmd+V, Ctrl+V or a
@@ -4585,6 +4508,19 @@ func (_handle Element) SelectionColor(c Color) Element {
 	return wrapElement(_node.SelectionColor(c))
 }
 
+// SetChanged reports the element's value as changed in this build pass,
+// as a widget of your own whose input changed what it edits: Changed
+// returns true for it, as for the widgets' own.
+func (_handle Element) SetChanged() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.SetChanged())
+}
+
 // SetTextSelection selects the runes of a text input from start to end, or
 // puts the caret at start when they are equal, and scrolls it into view: the
 // caret after a word the app completed. The offsets are kept within the text.
@@ -4746,18 +4682,6 @@ func (_handle Element) Submitted() bool {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.Submitted()
-}
-
-// TagStyle has fn style the runs of a RichTextEditor that carry a Tag, as
-// an app shows mentions or comments.
-func (_handle Element) TagStyle(fn func(tag string, s *Span)) Element {
-	_node := _handle.node()
-	if _node == nil {
-		return Element{}
-	}
-	_ctx := _node.c
-	_ = _ctx
-	return wrapElement(_node.TagStyle(fn))
 }
 
 // TextAlign aligns the lines of text: Start, Center or End.

@@ -93,8 +93,38 @@ func ShapeRichText(spans []Span, font Font, width float32) *TextLayout {
 	return shapeText(b.String(), font, width, slices.Clone(spans))
 }
 
+// TextShape is how ShapeRichTextWith lays text out.
+type TextShape struct {
+	// Width wraps lines at it, in DIPs; zero only breaks at newlines.
+	Width float32
+	// Align aligns the lines within Width: Start (the default, the right
+	// in right-to-left paragraphs), Center or End.
+	Align Align
+}
+
+// ShapeRichTextWith shapes spans as ShapeRichText does, laid out as shape
+// says: a rich text editor aligns its paragraphs.
+func ShapeRichTextWith(spans []Span, font Font, shape TextShape) *TextLayout {
+	var b strings.Builder
+	for _, sp := range spans {
+		b.WriteString(sp.Text)
+	}
+	return shapeTextAligned(b.String(), font, shape, slices.Clone(spans))
+}
+
 func shapeText(s string, font Font, width float32, spans []Span) *TextLayout {
-	l := text.Shared().Shape(text.Params{Text: s, Style: font.style(), Width: width, KeepSpaces: true, Spans: encodeSpans(spans)})
+	return shapeTextAligned(s, font, TextShape{Width: width}, spans)
+}
+
+func shapeTextAligned(s string, font Font, shape TextShape, spans []Span) *TextLayout {
+	params := text.Params{Text: s, Style: font.style(), Width: shape.Width, KeepSpaces: true, Spans: encodeSpans(spans)}
+	switch shape.Align {
+	case Center:
+		params.Align = text.Center
+	case End:
+		params.Align = text.End
+	}
+	l := text.Shared().Shape(params)
 	t := &TextLayout{l: l, units: make([]int, len(l.Runes)+1), spans: spans}
 	for i, r := range l.Runes {
 		t.units[i+1] = t.units[i] + utf16.RuneLen(r)

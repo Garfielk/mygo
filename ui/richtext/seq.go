@@ -1,11 +1,11 @@
-package ui
+package richtext
 
 // seq is a persistent sequence: an AVL tree whose leaves hold up to
 // seqChunk items each, as internal/rope's leaves hold text, and whose
 // nodes count the items below them. Replacing items copies the leaves it
 // touches and the path to them and shares the rest with the sequence
 // before it, so a version is a pointer, kept as long as wanted. An
-// AttributedText keeps its paragraphs in one, aligned with the lines of
+// Text keeps its paragraphs in one, aligned with the lines of
 // its text.
 type seq[T any] struct {
 	left, right *seq[T]

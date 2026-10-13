@@ -99,9 +99,6 @@ func (e *node) layoutInput(cw, ch float32) {
 	if a := ed.area; a != nil {
 		ed.contentW = cw
 		ed.originX, ed.originY = e.contentX(), e.contentY()
-		if ed.rich != nil {
-			ed.rich.setLook(e)
-		}
 		a.layout(e, cw, ch)
 		return
 	}
@@ -216,9 +213,6 @@ func (e *node) paintInput(p *Painter) {
 // input method's composition at the caret, between start and end, sits
 // unstyled between the runs, and those after it move past it.
 func (ed *editor) rangeSpans(start, end int) (string, *spanPaint) {
-	if ed.rich != nil {
-		return ed.rich.paraSpans(ed, start, end)
-	}
 	if !ed.apart {
 		ed.sortRanges()
 	}

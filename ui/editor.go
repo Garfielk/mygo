@@ -92,8 +92,6 @@ type editor struct {
 	dragStart        [2]int
 	pressMods        Modifiers
 	contentW         float32
-	// rich is a RichTextEditor's document and look, nil for other inputs.
-	rich *richEditor
 }
 
 func newEditor() *editor { return &editor{} }
@@ -156,10 +154,6 @@ func (ed *editor) commitCompose() {
 // process applies the input queued for the editor.
 func (ed *editor) process(c *context, e *node) {
 	st := e.st
-	if ed.rich != nil {
-		ed.rich.sync(ed)
-		defer ed.rich.publish(ed)
-	}
 	// The queue is taken first: a command may draw a nested frame, as GTK's
 	// clipboard read does, which must not apply the same input again.
 	queue := ed.queue
@@ -175,9 +169,6 @@ func (ed *editor) process(c *context, e *node) {
 		case editInsert:
 			ed.compose = ""
 			ed.insert(ev.text)
-			if ed.rich != nil {
-				ed.rich.typed(ed, ev.text)
-			}
 		case editCompose:
 			if ed.readOnly {
 				break

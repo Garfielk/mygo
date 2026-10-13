@@ -1,6 +1,7 @@
-package ui
+package richtext
 
 import (
+	"github.com/egoist/mygo/ui"
 	"iter"
 	"slices"
 	"strings"
@@ -10,8 +11,8 @@ import (
 	"github.com/egoist/mygo/internal/rope"
 )
 
-// AttributedText is text whose runs have attributes of their own, in
-// paragraphs that have a style of their own: what a RichTextEditor edits,
+// Text is text whose runs have attributes of their own, in
+// paragraphs that have a style of their own: what an Editor edits,
 // as Foundation's AttributedString is what SwiftUI's TextEditor edits. It
 // is a value: methods return a new text and leave the one they are called
 // on as it was, sharing what did not change with it, so that keeping a
@@ -24,16 +25,16 @@ import (
 // of its newline belong to it, as in word processors, so that an empty
 // paragraph remembers the attributes typing gets there. Runs are kept as
 // long as they can be: neighbors with the same attributes are one run.
-type AttributedText struct {
+type Text struct {
 	text  *rope.Node
 	paras *seq[richPara]
 }
 
-// TextAttributes are the attributes of a run of an AttributedText. What
+// Attributes are the attributes of a run of an Text. What
 // they leave zero takes the style of the editor showing the text (its
 // font, size and color), and Italic, Underline, Strikethrough and Code only
 // turn those on. They are comparable: runs with equal attributes are one.
-type TextAttributes struct {
+type Attributes struct {
 	// Font is a family, as for Element.Font.
 	Font string
 	// Size is in DIPs.
@@ -44,7 +45,7 @@ type TextAttributes struct {
 	Underline     bool
 	Strikethrough bool
 	// Color colors the text, Background highlights it.
-	Color, Background Color
+	Color, Background ui.Color
 	// Code shows inline code, in the editor's monospaced font. Typing at
 	// its edges does not continue it.
 	Code bool
@@ -53,7 +54,7 @@ type TextAttributes struct {
 	Link string
 	// Tag is the app's own mark over the run, as a mention or a comment's
 	// ID: typing at its edges does not continue it, and the app styles it
-	// with RichTextEditor's TagStyle.
+	// with EditorOptions.TagStyle.
 	Tag string
 	// Attachment is what an object replacement character (U+FFFC) shows:
 	// an image, or a drawing of the app's, inside the line. Only that
@@ -62,24 +63,24 @@ type TextAttributes struct {
 }
 
 // Bold reports whether the run is bold: its weight is 600 or more.
-func (a TextAttributes) Bold() bool { return a.Weight >= 600 }
+func (a Attributes) Bold() bool { return a.Weight >= 600 }
 
 // extends reports whether typing right after a run with the attributes
 // continues it. Links, code and tags hold only what they hold, as
 // NSTextView and the expand rules of Peritext and Loro leave them; every
 // other attribute carries on to what is typed after it.
-func (a TextAttributes) extending() TextAttributes {
+func (a Attributes) extending() Attributes {
 	a.Link, a.Code, a.Tag, a.Attachment = "", false, "", nil
 	return a
 }
 
-// Attachment is an object inside an AttributedText, as an image in a note:
-// one object replacement character (U+FFFC) whose TextAttributes hold it,
+// Attachment is an object inside an Text, as an image in a note:
+// one object replacement character (U+FFFC) whose Attributes hold it,
 // which the editor lays out as a box of its size inside the line, on the
 // baseline, and selects, copies and deletes as one character.
 type Attachment struct {
 	// Image is drawn in the box, unless Draw draws it.
-	Image ImageSource
+	Image ui.ImageSource
 	// Width and Height are the size of the box in DIPs; zero takes the
 	// image's size. A box wider than the editor is scaled down to fit.
 	Width, Height float32
@@ -91,7 +92,7 @@ type Attachment struct {
 	URL string
 	// Draw draws the attachment in r, instead of Image, as an app's chip
 	// for a mention or a file.
-	Draw func(p *Painter, r Rect)
+	Draw func(p *ui.Painter, r ui.Rect)
 	// Data is the app's.
 	Data any
 }
@@ -100,7 +101,7 @@ type Attachment struct {
 func (a *Attachment) size() (w, h float32) {
 	w, h = a.Width, a.Height
 	if a.Image != nil && (w <= 0 || h <= 0) {
-		iw, ih := a.Image.imageSize()
+		iw, ih := imageSize(a.Image)
 		switch {
 		case w <= 0 && h <= 0:
 			w, h = iw, ih
@@ -111,6 +112,18 @@ func (a *Attachment) size() (w, h float32) {
 		}
 	}
 	return max(w, 1), max(h, 1)
+}
+
+// imageSize returns the size an image shows at, in DIPs.
+func imageSize(src ui.ImageSource) (float32, float32) {
+	switch s := src.(type) {
+	case *ui.Bitmap:
+		w, h := s.Size()
+		return float32(w), float32(h)
+	case *ui.SVG:
+		return s.Size()
+	}
+	return 0, 0
 }
 
 // ObjectReplacement is the character an Attachment takes in a text.
@@ -130,7 +143,7 @@ const (
 	Tasks
 )
 
-// ParagraphStyle is the style of a paragraph of an AttributedText: what it
+// ParagraphStyle is the style of a paragraph of an Text: what it
 // is (a heading, an item of a list, a quote, a block of code) and how its
 // lines align. Lists are flat, as in Quill and Automerge: an item's Indent
 // is its level, and items next to each other make a list.
@@ -145,26 +158,26 @@ type ParagraphStyle struct {
 	// list's item, from 0.
 	Indent int
 	// Align aligns its lines: Start (the default), Center or End.
-	Align Align
+	Align ui.Align
 	// Quote and CodeBlock show the paragraph as a quotation, or as code in
 	// the monospaced font, its spaces kept.
 	Quote, CodeBlock bool
 }
 
-// TextRun is a run of text with its attributes.
-type TextRun struct {
+// Run is a run of text with its attributes.
+type Run struct {
 	Text       string
-	Attributes TextAttributes
+	Attributes Attributes
 }
 
-// Paragraph is a paragraph of an AttributedText: its style and its runs,
+// Paragraph is a paragraph of an Text: its style and its runs,
 // without its newline.
 type Paragraph struct {
 	Style ParagraphStyle
-	Runs  []TextRun
+	Runs  []Run
 }
 
-// richPara is a paragraph of an AttributedText. Its runs hold its runes
+// richPara is a paragraph of an Text. Its runs hold its runes
 // and, last, its end: its newline, or for the last paragraph the end of the
 // text, whose attributes are those typing gets in an empty paragraph. They
 // are as long as they can be, none empty: n+1 runes in all.
@@ -177,7 +190,7 @@ type richPara struct {
 
 type attrRun struct {
 	n int
-	a TextAttributes
+	a Attributes
 }
 
 // paraIDs numbers the paragraphs of every text, so that a paragraph keeps
@@ -197,35 +210,35 @@ func newPara(style ParagraphStyle, runs []attrRun) richPara {
 // emptyParas is the paragraph of the empty text.
 var emptyParas = seqLeaf([]richPara{{runs: []attrRun{{n: 1}}}})
 
-func (t AttributedText) seq() *seq[richPara] {
+func (t Text) seq() *seq[richPara] {
 	if t.paras == nil {
 		return emptyParas
 	}
 	return t.paras
 }
 
-// NewAttributedText returns s as an AttributedText, without attributes.
-func NewAttributedText(s string) AttributedText {
-	return AttributedTextOf(Paragraph{Runs: []TextRun{{Text: s}}})
+// NewText returns s as an Text, without attributes.
+func NewText(s string) Text {
+	return TextOf(Paragraph{Runs: []Run{{Text: s}}})
 }
 
-// AttributedTextOf returns an AttributedText of paragraphs. A newline in a
+// TextOf returns an Text of paragraphs. A newline in a
 // run starts another paragraph of the same style.
 //
-//	ui.AttributedTextOf(
-//		ui.Paragraph{Style: ui.ParagraphStyle{Heading: 1}, Runs: []ui.TextRun{{Text: "Groceries"}}},
-//		ui.Paragraph{Style: ui.ParagraphStyle{List: ui.Tasks}, Runs: []ui.TextRun{{Text: "Milk"}}},
+//	ui.TextOf(
+//		ui.Paragraph{Style: ui.ParagraphStyle{Heading: 1}, Runs: []ui.Run{{Text: "Groceries"}}},
+//		ui.Paragraph{Style: ui.ParagraphStyle{List: ui.Tasks}, Runs: []ui.Run{{Text: "Milk"}}},
 //	)
-func AttributedTextOf(paragraphs ...Paragraph) AttributedText {
+func TextOf(paragraphs ...Paragraph) Text {
 	if len(paragraphs) == 0 {
-		return AttributedText{}
+		return Text{}
 	}
 	var lines []string
 	var paras []richPara
 	for _, p := range paragraphs {
 		var line strings.Builder
 		var runs []attrRun
-		var last TextAttributes
+		var last Attributes
 		for _, r := range p.Runs {
 			last = r.Attributes
 			rest := r.Text
@@ -246,13 +259,13 @@ func AttributedTextOf(paragraphs ...Paragraph) AttributedText {
 		lines = append(lines, line.String())
 		paras = append(paras, newPara(p.Style, appendRun(runs, attrRun{1, last.extending()})))
 	}
-	return AttributedText{text: rope.Build(strings.Join(lines, "\n")), paras: seqBuild(paras)}
+	return Text{text: rope.Build(strings.Join(lines, "\n")), paras: seqBuild(paras)}
 }
 
 // appendRuns appends the runs of s with attributes a: an object
 // replacement character is a run of its own, where a holds an attachment,
 // which no other rune takes.
-func appendRuns(runs []attrRun, s string, a TextAttributes) []attrRun {
+func appendRuns(runs []attrRun, s string, a Attributes) []attrRun {
 	if s == "" {
 		return runs
 	}
@@ -302,26 +315,22 @@ func cutRuns(dst, runs []attrRun, from, to int) []attrRun {
 }
 
 // Len returns the number of runes of the text, newlines included.
-func (t AttributedText) Len() int { return rope.Sum(t.text).Runes }
+func (t Text) Len() int { return rope.Sum(t.text).Runes }
 
 // String returns the text without its attributes.
-func (t AttributedText) String() string { return rope.TextOf(t.text).String() }
+func (t Text) String() string { return rope.TextOf(t.text).String() }
 
 // ParagraphCount returns the number of paragraphs: one more than the
 // newlines.
-func (t AttributedText) ParagraphCount() int { return rope.Sum(t.text).Lines + 1 }
-
-// Snapshot returns the text without attributes as a TextSnapshot, which
-// shares its storage.
-func (t AttributedText) Snapshot() TextSnapshot { return TextSnapshot{root: t.text} }
+func (t Text) ParagraphCount() int { return rope.Sum(t.text).Lines + 1 }
 
 // Same reports whether t and u are the same version of a text, without
 // comparing them: a text is the same as what it was copied from.
-func (t AttributedText) Same(u AttributedText) bool { return t.text == u.text && t.paras == u.paras }
+func (t Text) Same(u Text) bool { return t.text == u.text && t.paras == u.paras }
 
 // Equal reports whether t and u hold the same text with the same
 // attributes and paragraph styles.
-func (t AttributedText) Equal(u AttributedText) bool {
+func (t Text) Equal(u Text) bool {
 	if t.Same(u) {
 		return true
 	}
@@ -339,13 +348,13 @@ func (t AttributedText) Equal(u AttributedText) bool {
 }
 
 // paraAt returns the paragraph holding rune i, whose newline is its.
-func (t AttributedText) paraAt(i int) int {
+func (t Text) paraAt(i int) int {
 	i = max(0, min(i, t.Len()))
 	return rope.Prefix(t.text, rope.ByteOfRune(t.text, i)).Lines
 }
 
 // paraStart returns the rune paragraph p starts at.
-func (t AttributedText) paraStart(p int) int {
+func (t Text) paraStart(p int) int {
 	if p <= 0 {
 		return 0
 	}
@@ -354,7 +363,7 @@ func (t AttributedText) paraStart(p int) int {
 
 // ParagraphRange returns where the paragraph holding rune i starts and
 // ends, before its newline.
-func (t AttributedText) ParagraphRange(i int) (start, end int) {
+func (t Text) ParagraphRange(i int) (start, end int) {
 	p := t.paraAt(i)
 	start = t.paraStart(p)
 	return start, start + seqAt(t.seq(), p).n
@@ -362,14 +371,14 @@ func (t AttributedText) ParagraphRange(i int) (start, end int) {
 
 // AttributesAt returns the attributes of rune i, or those of the end of
 // the text for its length.
-func (t AttributedText) AttributesAt(i int) TextAttributes {
+func (t Text) AttributesAt(i int) Attributes {
 	p := t.paraAt(i)
 	return seqAt(t.seq(), p).attributesAt(i - t.paraStart(p))
 }
 
 // attributesAt returns the attributes of rune i of the paragraph, its end
 // for its length.
-func (p *richPara) attributesAt(i int) TextAttributes {
+func (p *richPara) attributesAt(i int) Attributes {
 	at := 0
 	for _, r := range p.runs {
 		at += r.n
@@ -381,13 +390,13 @@ func (p *richPara) attributesAt(i int) TextAttributes {
 }
 
 // ParagraphStyleAt returns the style of the paragraph holding rune i.
-func (t AttributedText) ParagraphStyleAt(i int) ParagraphStyle {
+func (t Text) ParagraphStyleAt(i int) ParagraphStyle {
 	return seqAt(t.seq(), t.paraAt(i)).style
 }
 
 // Paragraphs returns the paragraphs of the text, with the rune each starts
 // at.
-func (t AttributedText) Paragraphs() iter.Seq2[int, Paragraph] {
+func (t Text) Paragraphs() iter.Seq2[int, Paragraph] {
 	return func(yield func(int, Paragraph) bool) {
 		start := 0
 		tx := rope.TextOf(t.text)
@@ -404,7 +413,7 @@ func (t AttributedText) Paragraphs() iter.Seq2[int, Paragraph] {
 					_, size := utf8.DecodeRuneInString(line[end:])
 					end += size
 				}
-				par.Runs = append(par.Runs, TextRun{Text: line[off:end], Attributes: r.a})
+				par.Runs = append(par.Runs, Run{Text: line[off:end], Attributes: r.a})
 				off = end
 			}
 			if !yield(start, par) {
@@ -419,8 +428,8 @@ func (t AttributedText) Paragraphs() iter.Seq2[int, Paragraph] {
 // Runs returns the runs of the text from rune start to rune end, with the
 // rune each starts at: the newline ending a paragraph is a run of its own,
 // or ends the paragraph's last run when it has the same attributes.
-func (t AttributedText) Runs(start, end int) iter.Seq2[int, TextRun] {
-	return func(yield func(int, TextRun) bool) {
+func (t Text) Runs(start, end int) iter.Seq2[int, Run] {
+	return func(yield func(int, Run) bool) {
 		n := t.Len()
 		start, end = max(0, min(start, n)), max(0, min(end, n))
 		if start >= end {
@@ -439,7 +448,7 @@ func (t AttributedText) Runs(start, end int) iter.Seq2[int, TextRun] {
 						ba = rope.ByteOfRune(t.text, a)
 					}
 					bz := rope.ByteOfRune(t.text, z)
-					if !yield(a, TextRun{Text: tx.Slice(ba, bz), Attributes: r.a}) {
+					if !yield(a, Run{Text: tx.Slice(ba, bz), Attributes: r.a}) {
 						return false
 					}
 				}
@@ -456,11 +465,11 @@ func (t AttributedText) Runs(start, end int) iter.Seq2[int, TextRun] {
 
 // Slice returns the runes from start to end with their attributes and the
 // styles of their paragraphs.
-func (t AttributedText) Slice(start, end int) AttributedText {
+func (t Text) Slice(start, end int) Text {
 	n := t.Len()
 	start, end = max(0, min(start, n)), max(0, min(end, n))
 	if start >= end {
-		return AttributedText{}
+		return Text{}
 	}
 	pa, pz := t.paraAt(start), t.paraAt(end)
 	sa, sz := t.paraStart(pa), t.paraStart(pz)
@@ -485,7 +494,7 @@ func (t AttributedText) Slice(start, end int) AttributedText {
 	})
 	_, rest := rope.Split(t.text, rope.ByteOfRune(t.text, start))
 	mid, _ := rope.Split(rest, rope.ByteOfRune(rest, end-start))
-	return AttributedText{text: mid, paras: seqBuild(paras)}
+	return Text{text: mid, paras: seqBuild(paras)}
 }
 
 // Replace returns the text with the runes from start to end replaced by
@@ -493,7 +502,7 @@ func (t AttributedText) Slice(start, end int) AttributedText {
 // rune comes from, as AppKit fixes paragraph styles: deleting the newline
 // after a heading keeps the heading, and text put at the start of a
 // paragraph brings its own paragraph's style.
-func (t AttributedText) Replace(start, end int, with AttributedText) AttributedText {
+func (t Text) Replace(start, end int, with Text) Text {
 	n := t.Len()
 	start, end = max(0, min(start, end, n)), max(0, min(max(start, end), n))
 	pa, pz := t.paraAt(start), t.paraAt(end)
@@ -547,7 +556,7 @@ func (t AttributedText) Replace(start, end int, with AttributedText) AttributedT
 	}
 	left, rest := rope.Split(t.text, rope.ByteOfRune(t.text, start))
 	_, right := rope.Split(rest, rope.ByteOfRune(rest, end-start))
-	return AttributedText{
+	return Text{
 		text:  rope.Join(rope.Join(left, with.text), right),
 		paras: seqReplace(s, pa, pz+1, out),
 	}
@@ -556,7 +565,7 @@ func (t AttributedText) Replace(start, end int, with AttributedText) AttributedT
 // ReplaceString returns the text with the runes from start to end replaced
 // by s, which takes attributes a and, for the paragraphs it adds, the style
 // of the paragraph holding start.
-func (t AttributedText) ReplaceString(start, end int, s string, a TextAttributes) AttributedText {
+func (t Text) ReplaceString(start, end int, s string, a Attributes) Text {
 	style := t.ParagraphStyleAt(start)
 	var frag []richPara
 	for rest := s; ; {
@@ -568,19 +577,19 @@ func (t AttributedText) ReplaceString(start, end int, s string, a TextAttributes
 		}
 		rest = after
 	}
-	return t.Replace(start, end, AttributedText{text: rope.Build(s), paras: seqBuild(frag)})
+	return t.Replace(start, end, Text{text: rope.Build(s), paras: seqBuild(frag)})
 }
 
 // Insert returns the text with with inserted at rune i.
-func (t AttributedText) Insert(i int, with AttributedText) AttributedText { return t.Replace(i, i, with) }
+func (t Text) Insert(i int, with Text) Text { return t.Replace(i, i, with) }
 
 // Delete returns the text without the runes from start to end.
-func (t AttributedText) Delete(start, end int) AttributedText {
-	return t.Replace(start, end, AttributedText{})
+func (t Text) Delete(start, end int) Text {
+	return t.Replace(start, end, Text{})
 }
 
 // Append returns the text followed by s with attributes a.
-func (t AttributedText) Append(s string, a TextAttributes) AttributedText {
+func (t Text) Append(s string, a Attributes) Text {
 	n := t.Len()
 	return t.ReplaceString(n, n, s, a)
 }
@@ -588,7 +597,7 @@ func (t AttributedText) Append(s string, a TextAttributes) AttributedText {
 // Format returns the text with fn changing the attributes of the runes
 // from start to end, newlines included. fn cannot add or take away an
 // attachment, which only an object replacement character has.
-func (t AttributedText) Format(start, end int, fn func(a *TextAttributes)) AttributedText {
+func (t Text) Format(start, end int, fn func(a *Attributes)) Text {
 	n := t.Len()
 	start, end = max(0, min(start, n)), max(0, min(end, n))
 	if start >= end {
@@ -617,13 +626,13 @@ func (t AttributedText) Format(start, end int, fn func(a *TextAttributes)) Attri
 		at += p.n + 1
 		return i < pz
 	})
-	return AttributedText{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
+	return Text{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
 }
 
 // FormatParagraphs returns the text with fn changing the styles of the
 // paragraphs from the one holding start to the one holding end, but for a
 // paragraph end only starts, after a selection of whole paragraphs.
-func (t AttributedText) FormatParagraphs(start, end int, fn func(p *ParagraphStyle)) AttributedText {
+func (t Text) FormatParagraphs(start, end int, fn func(p *ParagraphStyle)) Text {
 	pa, pz := t.paragraphSpan(start, end)
 	out := make([]richPara, 0, pz-pa+1)
 	seqEach(t.seq(), pa, func(i int, p *richPara) bool {
@@ -632,13 +641,13 @@ func (t AttributedText) FormatParagraphs(start, end int, fn func(p *ParagraphSty
 		out = append(out, q)
 		return i < pz
 	})
-	return AttributedText{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
+	return Text{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
 }
 
 // paragraphSpan returns the paragraphs a selection from start to end
 // formats: those it touches, but for the one after a selection ending at
 // its start.
-func (t AttributedText) paragraphSpan(start, end int) (int, int) {
+func (t Text) paragraphSpan(start, end int) (int, int) {
 	n := t.Len()
 	start, end = max(0, min(start, end, n)), max(0, min(max(start, end), n))
 	pa, pz := t.paraAt(start), t.paraAt(end)

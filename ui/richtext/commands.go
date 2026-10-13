@@ -1,6 +1,10 @@
-package ui
+package richtext
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+)
 
 // FormatState is whether a format holds for a selection: all of it, none,
 // or some of it, as a toolbar's button shows it.
@@ -12,13 +16,13 @@ const (
 	FormatMixed
 )
 
-// RichTextFormatting describes the formats of a document's selection, as
+// Formatting describes the formats of a document's selection, as
 // a toolbar and a Format menu show them: of the runes selected, or of the
 // typing attributes at a caret.
-type RichTextFormatting struct {
+type Formatting struct {
 	// Attributes are those of the first rune selected, or the typing
 	// attributes at a caret.
-	Attributes                                   TextAttributes
+	Attributes                                   Attributes
 	Bold, Italic, Underline, Strikethrough, Code FormatState
 	// Link is the link all of the selection is in, "" when none is.
 	Link string
@@ -29,15 +33,15 @@ type RichTextFormatting struct {
 }
 
 // Formatting returns the formats of the selection.
-func (d *RichTextDocument) Formatting() RichTextFormatting {
+func (d *Document) Formatting() Formatting {
 	d.lock()
 	defer d.mu.Unlock()
 	return d.formatting()
 }
 
-func (d *RichTextDocument) formatting() RichTextFormatting {
+func (d *Document) formatting() Formatting {
 	a, z := d.span()
-	f := RichTextFormatting{Attributes: d.typingAttributes()}
+	f := Formatting{Attributes: d.typingAttributes()}
 	state := func(on bool) FormatState {
 		if on {
 			return FormatOn
@@ -82,13 +86,13 @@ func (d *RichTextDocument) formatting() RichTextFormatting {
 
 // Format changes the attributes of the selection with fn, as one step of
 // undo, or the typing attributes at a caret.
-func (d *RichTextDocument) Format(fn func(a *TextAttributes)) {
+func (d *Document) Format(fn func(a *Attributes)) {
 	d.lock()
 	defer d.mu.Unlock()
 	d.format(fn)
 }
 
-func (d *RichTextDocument) format(fn func(a *TextAttributes)) {
+func (d *Document) format(fn func(a *Attributes)) {
 	a, z := d.span()
 	if a == z {
 		t := d.typingAttributes()
@@ -98,23 +102,23 @@ func (d *RichTextDocument) format(fn func(a *TextAttributes)) {
 		return
 	}
 	anchor, caret := d.anchor, d.caret
-	d.edit(false, func(e *RichTextEdit) { e.Format(a, z, fn) })
+	d.edit(false, func(e *Edit) { e.Format(a, z, fn) })
 	d.anchor, d.caret = anchor, caret
 }
 
 // toggle turns a format on for the selection unless all of it has it, then
 // off.
-func (d *RichTextDocument) toggle(state func(f RichTextFormatting) FormatState, set func(a *TextAttributes, on bool)) {
+func (d *Document) toggle(state func(f Formatting) FormatState, set func(a *Attributes, on bool)) {
 	d.lock()
 	defer d.mu.Unlock()
 	on := state(d.formatting()) != FormatOn
-	d.format(func(a *TextAttributes) { set(a, on) })
+	d.format(func(a *Attributes) { set(a, on) })
 }
 
 // ToggleBold makes the selection bold, or not when all of it is, as ⌘B
 // does.
-func (d *RichTextDocument) ToggleBold() {
-	d.toggle(func(f RichTextFormatting) FormatState { return f.Bold }, func(a *TextAttributes, on bool) {
+func (d *Document) ToggleBold() {
+	d.toggle(func(f Formatting) FormatState { return f.Bold }, func(a *Attributes, on bool) {
 		if on {
 			a.Weight = 700
 		} else {
@@ -125,25 +129,25 @@ func (d *RichTextDocument) ToggleBold() {
 
 // ToggleItalic, ToggleUnderline, ToggleStrikethrough and ToggleCode turn
 // those formats on for the selection, or off when all of it has them.
-func (d *RichTextDocument) ToggleItalic() {
-	d.toggle(func(f RichTextFormatting) FormatState { return f.Italic }, func(a *TextAttributes, on bool) { a.Italic = on })
+func (d *Document) ToggleItalic() {
+	d.toggle(func(f Formatting) FormatState { return f.Italic }, func(a *Attributes, on bool) { a.Italic = on })
 }
 
-func (d *RichTextDocument) ToggleUnderline() {
-	d.toggle(func(f RichTextFormatting) FormatState { return f.Underline }, func(a *TextAttributes, on bool) { a.Underline = on })
+func (d *Document) ToggleUnderline() {
+	d.toggle(func(f Formatting) FormatState { return f.Underline }, func(a *Attributes, on bool) { a.Underline = on })
 }
 
-func (d *RichTextDocument) ToggleStrikethrough() {
-	d.toggle(func(f RichTextFormatting) FormatState { return f.Strikethrough }, func(a *TextAttributes, on bool) { a.Strikethrough = on })
+func (d *Document) ToggleStrikethrough() {
+	d.toggle(func(f Formatting) FormatState { return f.Strikethrough }, func(a *Attributes, on bool) { a.Strikethrough = on })
 }
 
-func (d *RichTextDocument) ToggleCode() {
-	d.toggle(func(f RichTextFormatting) FormatState { return f.Code }, func(a *TextAttributes, on bool) { a.Code = on })
+func (d *Document) ToggleCode() {
+	d.toggle(func(f Formatting) FormatState { return f.Code }, func(a *Attributes, on bool) { a.Code = on })
 }
 
 // linkRange returns the runes around i that link to the same URL as the
 // rune at i, or i, i.
-func (t AttributedText) linkRange(i int) (int, int) {
+func (t Text) linkRange(i int) (int, int) {
 	url := t.AttributesAt(i).Link
 	if url == "" || i >= t.Len() {
 		return i, i
@@ -162,7 +166,7 @@ func (t AttributedText) linkRange(i int) (int, int) {
 // SetLink links the selection to url, or takes its link away for "". At a
 // caret inside a link, it changes or takes away that link; elsewhere it
 // inserts url, linked to itself.
-func (d *RichTextDocument) SetLink(url string) {
+func (d *Document) SetLink(url string) {
 	d.lock()
 	defer d.mu.Unlock()
 	a, z := d.span()
@@ -178,34 +182,34 @@ func (d *RichTextDocument) SetLink(url string) {
 			if url != "" {
 				attrs := d.typingAttributes()
 				attrs.Link = url
-				d.edit(false, func(e *RichTextEdit) { e.ReplaceString(a, a, url, attrs) })
+				d.edit(false, func(e *Edit) { e.ReplaceString(a, a, url, attrs) })
 			}
 			return
 		}
 		a, z = la, lz
 	}
 	anchor, caret := d.anchor, d.caret
-	d.edit(false, func(e *RichTextEdit) { e.Format(a, z, func(x *TextAttributes) { x.Link = url }) })
+	d.edit(false, func(e *Edit) { e.Format(a, z, func(x *Attributes) { x.Link = url }) })
 	d.anchor, d.caret = anchor, caret
 }
 
 // FormatParagraphs changes the styles of the paragraphs selected with fn,
 // as one step of undo.
-func (d *RichTextDocument) FormatParagraphs(fn func(p *ParagraphStyle)) {
+func (d *Document) FormatParagraphs(fn func(p *ParagraphStyle)) {
 	d.lock()
 	defer d.mu.Unlock()
 	d.formatParagraphs(fn)
 }
 
-func (d *RichTextDocument) formatParagraphs(fn func(p *ParagraphStyle)) {
+func (d *Document) formatParagraphs(fn func(p *ParagraphStyle)) {
 	a, z := d.span()
 	anchor, caret, typing := d.anchor, d.caret, d.typing
-	d.edit(false, func(e *RichTextEdit) { e.FormatParagraphs(a, z, fn) })
+	d.edit(false, func(e *Edit) { e.FormatParagraphs(a, z, fn) })
 	d.anchor, d.caret, d.typing = anchor, caret, typing
 }
 
 // paragraphsAll reports whether every paragraph selected satisfies fn.
-func (d *RichTextDocument) paragraphsAll(fn func(p ParagraphStyle) bool) bool {
+func (d *Document) paragraphsAll(fn func(p ParagraphStyle) bool) bool {
 	a, z := d.span()
 	pa, pz := d.text.paragraphSpan(a, z)
 	all := true
@@ -218,7 +222,7 @@ func (d *RichTextDocument) paragraphsAll(fn func(p ParagraphStyle) bool) bool {
 
 // SetHeading makes the paragraphs selected headings of level, from 1, or
 // body paragraphs for 0.
-func (d *RichTextDocument) SetHeading(level int) {
+func (d *Document) SetHeading(level int) {
 	d.FormatParagraphs(func(p *ParagraphStyle) {
 		p.Heading = max(0, min(level, 6))
 		if p.Heading > 0 {
@@ -229,7 +233,7 @@ func (d *RichTextDocument) SetHeading(level int) {
 
 // ToggleList makes the paragraphs selected items of a list of kind, or
 // takes them out of it when all of them are.
-func (d *RichTextDocument) ToggleList(kind ListKind) {
+func (d *Document) ToggleList(kind ListKind) {
 	d.lock()
 	defer d.mu.Unlock()
 	off := d.paragraphsAll(func(p ParagraphStyle) bool { return p.List == kind })
@@ -247,14 +251,14 @@ func (d *RichTextDocument) ToggleList(kind ListKind) {
 
 // ToggleQuote and ToggleCodeBlock make the paragraphs selected a quotation
 // or a block of code, or not when all of them are.
-func (d *RichTextDocument) ToggleQuote() {
+func (d *Document) ToggleQuote() {
 	d.lock()
 	defer d.mu.Unlock()
 	off := d.paragraphsAll(func(p ParagraphStyle) bool { return p.Quote })
 	d.formatParagraphs(func(p *ParagraphStyle) { p.Quote = !off })
 }
 
-func (d *RichTextDocument) ToggleCodeBlock() {
+func (d *Document) ToggleCodeBlock() {
 	d.lock()
 	defer d.mu.Unlock()
 	off := d.paragraphsAll(func(p ParagraphStyle) bool { return p.CodeBlock })
@@ -271,21 +275,21 @@ const maxIndent = 8
 
 // Indent indents the paragraphs selected by levels, or outdents them for
 // a negative count, as Tab and Shift-Tab do in a list.
-func (d *RichTextDocument) Indent(levels int) {
+func (d *Document) Indent(levels int) {
 	d.FormatParagraphs(func(p *ParagraphStyle) { p.Indent = max(0, min(p.Indent+levels, maxIndent)) })
 }
 
 // SetAlign aligns the lines of the paragraphs selected.
-func (d *RichTextDocument) SetAlign(a Align) {
+func (d *Document) SetAlign(a ui.Align) {
 	d.FormatParagraphs(func(p *ParagraphStyle) { p.Align = a })
 }
 
 // ToggleChecked checks the task holding rune i, or unchecks it.
-func (d *RichTextDocument) ToggleChecked(i int) {
+func (d *Document) ToggleChecked(i int) {
 	d.lock()
 	defer d.mu.Unlock()
 	anchor, caret, typing := d.anchor, d.caret, d.typing
-	d.edit(false, func(e *RichTextEdit) {
+	d.edit(false, func(e *Edit) {
 		e.FormatParagraphs(i, i, func(p *ParagraphStyle) {
 			if p.List == Tasks {
 				p.Checked = !p.Checked
@@ -297,30 +301,30 @@ func (d *RichTextDocument) ToggleChecked(i int) {
 
 // InsertText replaces the selection with s, in the typing attributes, as
 // typing does but as a step of undo of its own.
-func (d *RichTextDocument) InsertText(s string) {
+func (d *Document) InsertText(s string) {
 	d.lock()
 	defer d.mu.Unlock()
 	a, z := d.span()
 	attrs := d.typingAttributes()
-	d.edit(false, func(e *RichTextEdit) { e.ReplaceString(a, z, s, attrs) })
+	d.edit(false, func(e *Edit) { e.ReplaceString(a, z, s, attrs) })
 }
 
 // Insert replaces the selection with text, as a paste does.
-func (d *RichTextDocument) Insert(text AttributedText) {
+func (d *Document) Insert(text Text) {
 	d.lock()
 	defer d.mu.Unlock()
 	a, z := d.span()
-	d.edit(false, func(e *RichTextEdit) { e.Replace(a, z, text) })
+	d.edit(false, func(e *Edit) { e.Replace(a, z, text) })
 }
 
 // InsertAttachment replaces the selection with an attachment.
-func (d *RichTextDocument) InsertAttachment(a *Attachment) {
+func (d *Document) InsertAttachment(a *Attachment) {
 	d.lock()
 	defer d.mu.Unlock()
 	s, z := d.span()
 	attrs := d.typingAttributes().extending()
 	attrs.Attachment = a
-	d.edit(false, func(e *RichTextEdit) { e.ReplaceString(s, z, string(ObjectReplacement), attrs) })
+	d.edit(false, func(e *Edit) { e.ReplaceString(s, z, string(ObjectReplacement), attrs) })
 }
 
 // normalizeNewlines turns the newlines of other systems into "\n".

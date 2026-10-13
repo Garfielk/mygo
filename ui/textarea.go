@@ -166,7 +166,7 @@ func (a *area) paraLayout(ed *editor, p int) *text.Layout {
 		at := runeOffset(t, ed.caret-b.start(p))
 		t = t[:at] + compose + t[at:]
 	}
-	params := ed.paraParams(p, a.params)
+	params := a.params
 	// A paragraph's layout outlives edits elsewhere. Its text must not
 	// pin the old document when the buffer replaces it with a new string.
 	if !b.indexed && len(t) < b.byteLen() {
@@ -177,30 +177,13 @@ func (a *area) paraLayout(ed *editor, p int) *text.Layout {
 	if pr.layout == nil {
 		a.laid++
 	}
-	above, below := ed.paraSpace(p)
-	h := above + l.Height + below
 	if pr.h > 0 {
-		a.hs.add(p, float64(h-pr.h), 0)
+		a.hs.add(p, float64(l.Height-pr.h), 0)
 	} else {
-		a.hs.add(p, float64(h), -1)
+		a.hs.add(p, float64(l.Height), -1)
 	}
-	pr.layout, pr.compose, pr.spans, pr.h = l, compose, spans, h
+	pr.layout, pr.compose, pr.spans, pr.h = l, compose, spans, l.Height
 	return l
-}
-
-// paraHeight returns the height paragraph p takes: its layout's, and the
-// room a rich text leaves around it.
-func (a *area) paraHeight(ed *editor, p int) float32 {
-	a.paraLayout(ed, p)
-	return ed.buf.paras[p].h
-}
-
-// origin returns where the layout of paragraph p starts in the content:
-// right of its indentation, below the room above it.
-func (a *area) origin(ed *editor, p int) (x float32, y float64) {
-	left, _ := ed.paraInsets(p)
-	above, _ := ed.paraSpace(p)
-	return left, a.hs.top(p) + float64(above)
 }
 
 // local returns where rune i of paragraph p is in its layout, which holds
@@ -239,8 +222,7 @@ func (a *area) caretAt(ed *editor, i, extra int) (x float32, y float64, h float3
 		affinity = ed.caretAffinity
 	}
 	x, ly, h := l.CaretAt(text.CaretPosition{Index: a.local(ed, p, i) + extra, Affinity: affinity})
-	ox, oy := a.origin(ed, p)
-	return ox + x, oy + float64(ly), h
+	return x, a.hs.top(p) + float64(ly), h
 }
 
 // lineEdges returns the edges of the visual line holding rune i.
@@ -285,11 +267,10 @@ func (a *area) hitPosition(ed *editor, x float32, y float64, virtual bool) text.
 		switch {
 		case y < top && p > 0:
 			p--
-		case y >= top+float64(ed.buf.paras[p].h) && p < n-1:
+		case y >= top+float64(l.Height) && p < n-1:
 			p++
 		default:
-			ox, oy := a.origin(ed, p)
-			position := l.PositionAt(x-ox, float32(y-oy))
+			position := l.PositionAt(x, float32(y-top))
 			if virtual {
 				position.Index += ed.buf.start(p)
 				if ed.compose != "" && p > ed.buf.para(ed.caret) {
@@ -341,7 +322,7 @@ func (a *area) layout(e *node, cw, ch float32) {
 			// heights were estimated.
 			p := b.para(ed.caret)
 			for q, room := p-1, y+float64(h)-a.hs.top(p); q >= 0 && room < float64(ch); q-- {
-				room += float64(a.paraHeight(ed, q))
+				room += float64(a.paraLayout(ed, q).Height)
 			}
 			_, y, h = a.caretAt(ed, ed.caret, ed.composeCaret)
 			a.setScroll(y + float64(h) - float64(ch))
@@ -380,7 +361,7 @@ func (a *area) place(ed *editor, ch, above, below float32) {
 	y := a.hs.top(a.first)
 	p := a.first
 	for ; p < n; p++ {
-		y += float64(a.paraHeight(ed, p))
+		y += float64(a.paraLayout(ed, p).Height)
 		if y >= a.scroll+float64(ch+below) {
 			break
 		}
@@ -411,15 +392,10 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 	last := len(b.paras) - 1
 	for i := a.first; i <= a.last; i++ {
 		l := a.paraLayout(ed, i)
-		top := oy + float32(a.hs.top(i)-a.scroll)
-		px, py := a.origin(ed, i)
-		x, y := ox+px, oy+float32(py-a.scroll)
-		if r := ed.rich; r != nil {
-			r.paintParagraph(ed, p, i, l, x, y, top, b.paras[i].h, ed.contentW)
-		}
+		y := oy + float32(a.hs.top(i)-a.scroll)
 		start, end := b.start(i), b.end(i)
 		_, sp := ed.rangeSpans(start, end)
-		p.textBackgrounds(l, x, y, ts, sp)
+		p.textBackgrounds(l, ox, y, ts, sp)
 		if focused {
 			for _, selected := range ed.selectedRanges() {
 				sa, sz := selected.Start, selected.End
@@ -428,15 +404,15 @@ func (a *area) paint(e *node, p *Painter, ox, oy float32) {
 				}
 				from, to := a.local(ed, i, max(sa, start)), a.local(ed, i, min(sz, end))
 				for _, r := range l.SelectionVisual(from, to, sz > end && i < last) {
-					p.Fill(Rect{x + r.X, y + r.Y, r.W, r.H}, ts.selectionColor(t), 0)
+					p.Fill(Rect{ox + r.X, y + r.Y, r.W, r.H}, ts.selectionColor(t), 0)
 				}
 			}
 		}
-		p.textForeground(l, x, y, ts.color, ts, sp)
+		p.textForeground(l, ox, y, ts.color, ts, sp)
 		if ed.compose != "" && b.para(ed.caret) == i {
 			c := ed.caret - start
 			for _, r := range l.Selection(c, c+utf8.RuneCountInString(ed.compose)) {
-				p.Fill(Rect{x + r.X, y + r.Y + r.H - 2, r.W, 1}, ts.color, 0)
+				p.Fill(Rect{ox + r.X, y + r.Y + r.H - 2, r.W, 1}, ts.color, 0)
 			}
 		}
 	}

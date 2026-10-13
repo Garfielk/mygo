@@ -1,31 +1,33 @@
-package ui
+package richtext
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // richTester builds a RichTextEditor of doc filling a window, focused at
 // the end of its text.
-func richTester(t *testing.T, doc *RichTextDocument) (*Tester, *bool) {
+func richTester(t *testing.T, doc *Document) (*ui.Tester, *bool) {
 	t.Helper()
 	changed := new(bool)
-	tt := coreNewTester(func(c *context) {
-		if coreRichTextEditor(c, doc).Fill().Changed() {
+	tt := ui.NewTester(func(c *ui.Context) {
+		if Editor(c, doc).Fill().Changed() {
 			*changed = true
 		}
 	}, 500, 400)
 	tt.Press(250, 380)
 	tt.Release(250, 380)
-	tt.Key(Cmd, KeyDown)
+	tt.Key(ui.Cmd, ui.KeyDown)
 	return tt, changed
 }
 
 // runsOf describes the runs of a text: their text, marked with what they
 // are, as "plain|*bold*|_italic_|[link]".
-func runsOf(at AttributedText) string {
+func runsOf(at Text) string {
 	var parts []string
-	var last TextAttributes
+	var last Attributes
 	for i, r := range at.Runs(0, at.Len()) {
 		if i > 0 && r.Attributes == last && len(parts) > 0 {
 			// A run of the next paragraph, as the one before.
@@ -62,19 +64,19 @@ func joinRun(run, text string) string {
 }
 
 // typeRunes types s a rune at a time, as a keyboard does.
-func typeRunes(tt *Tester, s string) {
+func typeRunes(tt *ui.Tester, s string) {
 	for _, r := range s {
 		tt.Type(string(r))
 	}
 }
 
 func TestRichTextTyping(t *testing.T) {
-	doc := NewRichTextDocument(AttributedText{})
+	doc := NewDocument(Text{})
 	tt, changed := richTester(t, doc)
 	tt.Type("plain ")
-	tt.Key(Cmd, KeyB)
+	tt.Key(ui.Cmd, ui.KeyB)
 	tt.Type("bold")
-	tt.Key(Cmd, KeyB)
+	tt.Key(ui.Cmd, ui.KeyB)
 	tt.Type(" more")
 	if got := runsOf(doc.Text()); got != "plain |*bold*| more" {
 		t.Fatalf("runs %q", got)
@@ -95,8 +97,8 @@ func TestRichTextTyping(t *testing.T) {
 }
 
 func TestRichTextLinkEdges(t *testing.T) {
-	doc := NewRichTextDocument(AttributedTextOf(Paragraph{Runs: []TextRun{
-		{Text: "see "}, {Text: "docs", Attributes: TextAttributes{Link: "https://x"}}, {Text: " now"},
+	doc := NewDocument(TextOf(Paragraph{Runs: []Run{
+		{Text: "see "}, {Text: "docs", Attributes: Attributes{Link: "https://x"}}, {Text: " now"},
 	}}))
 	tt, _ := richTester(t, doc)
 	doc.SetSelection(8, 8)
@@ -111,9 +113,9 @@ func TestRichTextLinkEdges(t *testing.T) {
 }
 
 func TestRichTextCaretFormatIsNoStep(t *testing.T) {
-	doc := NewRichTextDocument(NewAttributedText("hello"))
+	doc := NewDocument(NewText("hello"))
 	tt, _ := richTester(t, doc)
-	tt.Key(Cmd, KeyB)
+	tt.Key(ui.Cmd, ui.KeyB)
 	if doc.CanUndo() {
 		t.Fatal("⌘B at a caret made a step of undo")
 	}
@@ -121,48 +123,48 @@ func TestRichTextCaretFormatIsNoStep(t *testing.T) {
 		t.Fatalf("typing attributes not bold: %+v", f)
 	}
 	// Moving the caret forgets them.
-	tt.Key(0, KeyLeft)
+	tt.Key(0, ui.KeyLeft)
 	if doc.Formatting().Bold != FormatOff {
 		t.Fatal("moving the caret kept the typing attributes")
 	}
 }
 
 func TestRichTextUndoRestoresAttributes(t *testing.T) {
-	doc := NewRichTextDocument(AttributedTextOf(Paragraph{Runs: []TextRun{
-		{Text: "a "}, {Text: "bold", Attributes: TextAttributes{Weight: 700}}, {Text: " word"},
+	doc := NewDocument(TextOf(Paragraph{Runs: []Run{
+		{Text: "a "}, {Text: "bold", Attributes: Attributes{Weight: 700}}, {Text: " word"},
 	}}))
 	tt, _ := richTester(t, doc)
 	before := doc.Text()
 	doc.SetSelection(2, 6)
 	tt.Frame()
-	tt.Key(0, KeyBackspace)
+	tt.Key(0, ui.KeyBackspace)
 	if got := doc.Text().String(); got != "a  word" {
 		t.Fatalf("deleted to %q", got)
 	}
-	tt.Key(Cmd, KeyZ)
+	tt.Key(ui.Cmd, ui.KeyZ)
 	if !doc.Text().Equal(before) {
 		t.Fatalf("undo made %q", runsOf(doc.Text()))
 	}
 	if a, c := doc.Selection(); a != 2 || c != 6 {
 		t.Fatalf("undo selected %d–%d", a, c)
 	}
-	tt.Key(Cmd|Shift, KeyZ)
+	tt.Key(ui.Cmd|ui.Shift, ui.KeyZ)
 	if got := doc.Text().String(); got != "a  word" {
 		t.Fatalf("redo made %q", got)
 	}
 }
 
 func TestRichTextFormatUndo(t *testing.T) {
-	doc := NewRichTextDocument(NewAttributedText("one two"))
+	doc := NewDocument(NewText("one two"))
 	tt, _ := richTester(t, doc)
 	doc.SetSelection(4, 7)
 	tt.Frame()
-	tt.Key(Cmd, KeyI)
-	tt.Key(Cmd, KeyU)
+	tt.Key(ui.Cmd, ui.KeyI)
+	tt.Key(ui.Cmd, ui.KeyU)
 	if got := runsOf(doc.Text()); got != "one |~_two_~" {
 		t.Fatalf("runs %q", got)
 	}
-	tt.Key(Cmd, KeyZ)
+	tt.Key(ui.Cmd, ui.KeyZ)
 	if got := runsOf(doc.Text()); got != "one |_two_" {
 		t.Fatalf("after one undo %q", got)
 	}
@@ -172,12 +174,12 @@ func TestRichTextFormatUndo(t *testing.T) {
 }
 
 func TestRichTextLists(t *testing.T) {
-	doc := NewRichTextDocument(AttributedText{})
+	doc := NewDocument(Text{})
 	tt, _ := richTester(t, doc)
 	typeRunes(tt, "- milk")
-	tt.Key(0, KeyEnter)
+	tt.Key(0, ui.KeyEnter)
 	typeRunes(tt, "eggs")
-	tt.Key(0, KeyEnter)
+	tt.Key(0, ui.KeyEnter)
 	at := doc.Text()
 	if got := at.String(); got != "milk\neggs\n" {
 		t.Fatalf("text %q", got)
@@ -188,7 +190,7 @@ func TestRichTextLists(t *testing.T) {
 		}
 	}
 	// Enter on an empty item leaves the list.
-	tt.Key(0, KeyEnter)
+	tt.Key(0, ui.KeyEnter)
 	at = doc.Text()
 	if at.String() != "milk\neggs\n" || at.ParagraphStyleAt(at.Len()).List != NoList {
 		t.Fatalf("%q %+v", at.String(), at.ParagraphStyleAt(at.Len()))
@@ -197,39 +199,39 @@ func TestRichTextLists(t *testing.T) {
 	// it out of the list.
 	doc.SetSelection(5, 5)
 	tt.Frame()
-	tt.Key(0, KeyTab)
+	tt.Key(0, ui.KeyTab)
 	if got := doc.Text().ParagraphStyleAt(5).Indent; got != 1 {
 		t.Fatalf("indent %d", got)
 	}
-	tt.Key(0, KeyBackspace)
-	tt.Key(0, KeyBackspace)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Key(0, ui.KeyBackspace)
 	if st := doc.Text().ParagraphStyleAt(5); st.List != NoList || st.Indent != 0 {
 		t.Fatalf("style %+v", st)
 	}
 }
 
 func TestRichTextHeadings(t *testing.T) {
-	doc := NewRichTextDocument(AttributedText{})
+	doc := NewDocument(Text{})
 	tt, _ := richTester(t, doc)
 	typeRunes(tt, "## Title")
-	tt.Key(0, KeyEnter)
+	tt.Key(0, ui.KeyEnter)
 	typeRunes(tt, "body")
 	at := doc.Text()
 	if at.String() != "Title\nbody" || at.ParagraphStyleAt(0).Heading != 2 || at.ParagraphStyleAt(7).Heading != 0 {
 		t.Fatalf("%q %+v %+v", at.String(), at.ParagraphStyleAt(0), at.ParagraphStyleAt(7))
 	}
 	// Undo takes the shortcut back to what was typed.
-	doc2 := NewRichTextDocument(AttributedText{})
+	doc2 := NewDocument(Text{})
 	tt2, _ := richTester(t, doc2)
 	typeRunes(tt2, "# ")
-	tt2.Key(Cmd, KeyZ)
+	tt2.Key(ui.Cmd, ui.KeyZ)
 	if got := doc2.Text(); got.String() != "# " || got.ParagraphStyleAt(0).Heading != 0 {
 		t.Fatalf("undo of the shortcut: %q", got.String())
 	}
 }
 
 func TestRichTextInlineShortcuts(t *testing.T) {
-	doc := NewRichTextDocument(AttributedText{})
+	doc := NewDocument(Text{})
 	tt, _ := richTester(t, doc)
 	typeRunes(tt, "a **big** and `x` then")
 	if got := runsOf(doc.Text()); got != "a |*big*| and |`x`| then" {
@@ -238,9 +240,9 @@ func TestRichTextInlineShortcuts(t *testing.T) {
 }
 
 func TestRichTextCompose(t *testing.T) {
-	doc := NewRichTextDocument(NewAttributedText("ab"))
+	doc := NewDocument(NewText("ab"))
 	tt, _ := richTester(t, doc)
-	tt.Key(Cmd, KeyB)
+	tt.Key(ui.Cmd, ui.KeyB)
 	tt.Compose("ni", 2)
 	tt.Compose("你", 1)
 	tt.Compose("", 0)
@@ -251,7 +253,7 @@ func TestRichTextCompose(t *testing.T) {
 }
 
 func TestRichTextAppCommands(t *testing.T) {
-	doc := NewRichTextDocument(NewAttributedText("first\nsecond"))
+	doc := NewDocument(NewText("first\nsecond"))
 	tt, _ := richTester(t, doc)
 	doc.SetSelection(0, 3)
 	doc.ToggleBold()

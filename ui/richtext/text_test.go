@@ -1,6 +1,7 @@
-package ui
+package richtext
 
 import (
+	"github.com/egoist/mygo/ui"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -10,7 +11,7 @@ import (
 // of the paragraph it came from.
 type cell struct {
 	r     rune
-	a     TextAttributes
+	a     Attributes
 	style ParagraphStyle
 }
 
@@ -18,7 +19,7 @@ type cell struct {
 // end of the text.
 type naive []cell
 
-func naiveOf(t AttributedText) naive {
+func naiveOf(t Text) naive {
 	var out naive
 	for _, p := range t.Paragraphs() {
 		_ = p
@@ -44,7 +45,7 @@ func naiveOf(t AttributedText) naive {
 }
 
 // normalize gives every cell of a paragraph the style of its first, as
-// AttributedText keeps one style a paragraph.
+// Text keeps one style a paragraph.
 func (n naive) normalize() naive {
 	start := 0
 	for i, c := range n {
@@ -66,7 +67,7 @@ func (n naive) String() string {
 	return b.String()
 }
 
-func checkInvariants(t *testing.T, at AttributedText) {
+func checkInvariants(t *testing.T, at Text) {
 	t.Helper()
 	s := at.String()
 	lines := strings.Split(s, "\n")
@@ -91,7 +92,7 @@ func checkInvariants(t *testing.T, at AttributedText) {
 	})
 }
 
-func compareNaive(t *testing.T, at AttributedText, want naive) {
+func compareNaive(t *testing.T, at Text, want naive) {
 	t.Helper()
 	checkInvariants(t, at)
 	got := naiveOf(at)
@@ -108,26 +109,26 @@ func compareNaive(t *testing.T, at AttributedText, want naive) {
 	}
 }
 
-var testAttrs = []TextAttributes{{}, {Weight: 700}, {Italic: true}, {Link: "https://a"}, {Weight: 700, Italic: true}, {Color: RGB(200, 0, 0)}}
-var testStyles = []ParagraphStyle{{}, {Heading: 1}, {List: Bullets}, {List: Numbers, Indent: 1}, {Align: Center}}
+var testAttrs = []Attributes{{}, {Weight: 700}, {Italic: true}, {Link: "https://a"}, {Weight: 700, Italic: true}, {Color: ui.RGB(200, 0, 0)}}
+var testStyles = []ParagraphStyle{{}, {Heading: 1}, {List: Bullets}, {List: Numbers, Indent: 1}, {Align: ui.Center}}
 
-func randomText(rnd *rand.Rand) AttributedText {
+func randomText(rnd *rand.Rand) Text {
 	var paras []Paragraph
 	for range 1 + rnd.IntN(4) {
 		p := Paragraph{Style: testStyles[rnd.IntN(len(testStyles))]}
 		for range rnd.IntN(4) {
 			words := []string{"a", "bc", "déf", "ghij", " ", "😀"}
-			p.Runs = append(p.Runs, TextRun{Text: words[rnd.IntN(len(words))], Attributes: testAttrs[rnd.IntN(len(testAttrs))]})
+			p.Runs = append(p.Runs, Run{Text: words[rnd.IntN(len(words))], Attributes: testAttrs[rnd.IntN(len(testAttrs))]})
 		}
 		paras = append(paras, p)
 	}
-	return AttributedTextOf(paras...)
+	return TextOf(paras...)
 }
 
 func TestAttributedTextOf(t *testing.T) {
-	at := AttributedTextOf(
-		Paragraph{Style: ParagraphStyle{Heading: 1}, Runs: []TextRun{{Text: "Title"}}},
-		Paragraph{Runs: []TextRun{{Text: "Hello "}, {Text: "bold", Attributes: TextAttributes{Weight: 700}}, {Text: " and"}, {Text: " more"}}},
+	at := TextOf(
+		Paragraph{Style: ParagraphStyle{Heading: 1}, Runs: []Run{{Text: "Title"}}},
+		Paragraph{Runs: []Run{{Text: "Hello "}, {Text: "bold", Attributes: Attributes{Weight: 700}}, {Text: " and"}, {Text: " more"}}},
 		Paragraph{},
 	)
 	checkInvariants(t, at)
@@ -147,18 +148,18 @@ func TestAttributedTextOf(t *testing.T) {
 	if !at.AttributesAt(12).Bold() || at.AttributesAt(16).Bold() {
 		t.Fatal("attributes")
 	}
-	if (AttributedText{}).Len() != 0 || (AttributedText{}).ParagraphCount() != 1 {
+	if (Text{}).Len() != 0 || (Text{}).ParagraphCount() != 1 {
 		t.Fatal("the zero text")
 	}
-	if !AttributedTextOf(Paragraph{Runs: []TextRun{{Text: "a\nb"}}}).Equal(NewAttributedText("a\nb")) {
+	if !TextOf(Paragraph{Runs: []Run{{Text: "a\nb"}}}).Equal(NewText("a\nb")) {
 		t.Fatal("a newline in a run starts a paragraph")
 	}
 }
 
 func TestAttributedTextJoinParagraphs(t *testing.T) {
-	at := AttributedTextOf(
-		Paragraph{Style: ParagraphStyle{Heading: 1}, Runs: []TextRun{{Text: "Title"}}},
-		Paragraph{Runs: []TextRun{{Text: "body"}}},
+	at := TextOf(
+		Paragraph{Style: ParagraphStyle{Heading: 1}, Runs: []Run{{Text: "Title"}}},
+		Paragraph{Runs: []Run{{Text: "body"}}},
 	)
 	// Deleting the newline after a heading keeps the heading.
 	joined := at.Delete(5, 6)
@@ -172,7 +173,7 @@ func TestAttributedTextJoinParagraphs(t *testing.T) {
 	}
 	// Enter at the end of the heading: both paragraphs are headings, until
 	// the editor makes the new one a body paragraph.
-	split := at.ReplaceString(5, 5, "\n", TextAttributes{})
+	split := at.ReplaceString(5, 5, "\n", Attributes{})
 	if split.String() != "Title\n\nbody" || split.ParagraphStyleAt(6).Heading != 1 || split.ParagraphStyleAt(7).Heading != 0 {
 		t.Fatalf("%q", split.String())
 	}
@@ -183,12 +184,12 @@ func TestAttributedTextJoinParagraphs(t *testing.T) {
 
 func TestAttributedTextAttachments(t *testing.T) {
 	img := &Attachment{Name: "photo", Width: 20, Height: 10}
-	at := NewAttributedText("ab").ReplaceString(1, 1, "￼￼x", TextAttributes{Attachment: img})
+	at := NewText("ab").ReplaceString(1, 1, "￼￼x", Attributes{Attachment: img})
 	checkInvariants(t, at)
 	if at.AttributesAt(1).Attachment != img || at.AttributesAt(2).Attachment != img || at.AttributesAt(3).Attachment != nil {
 		t.Fatal("only object replacement characters hold the attachment")
 	}
-	f := at.Format(0, at.Len(), func(a *TextAttributes) { a.Weight = 700; a.Attachment = nil })
+	f := at.Format(0, at.Len(), func(a *Attributes) { a.Weight = 700; a.Attachment = nil })
 	if f.AttributesAt(1).Attachment != img || !f.AttributesAt(1).Bold() {
 		t.Fatal("Format keeps attachments")
 	}
@@ -217,7 +218,7 @@ func TestAttributedTextRandom(t *testing.T) {
 				at, model = at.Replace(a, z, with), next.normalize()
 			case 2:
 				attrs := testAttrs[rnd.IntN(len(testAttrs))]
-				at = at.Format(a, z, func(x *TextAttributes) { *x = attrs })
+				at = at.Format(a, z, func(x *Attributes) { *x = attrs })
 				for i := a; i < z; i++ {
 					model[i].a = attrs
 				}
@@ -264,7 +265,7 @@ func TestAttributedTextSliceReplace(t *testing.T) {
 	}
 }
 
-func runsEqual(a, b AttributedText) bool {
+func runsEqual(a, b Text) bool {
 	ma, mb := naiveOf(a), naiveOf(b)
 	if len(ma) != len(mb) {
 		return false
