@@ -266,7 +266,7 @@ func (v *view) setLook(t *ui.Theme, styled bool) {
 		tagStyle: v.opts.TagStyle,
 	}
 	if styled {
-		v.padX, v.padY = t.Space(3), t.Space(2.5)
+		v.padX, v.padY = th.Padding[0], th.Padding[1]
 	} else {
 		v.padX, v.padY = 0, 0
 	}

@@ -57,6 +57,15 @@ func TestThemeLook(t *testing.T) {
 	if left, right := v.insets(ParagraphStyle{CodeBlock: true, Indent: 1}); left != 30 || right != 10 {
 		t.Errorf("code block insets %v %v", left, right)
 	}
+	v.opts.Theme = &Theme{Padding: [2]float32{20, 0}}
+	v.setLook(ui.LightTheme(), true)
+	if v.padX != 20 || v.padY != ui.LightTheme().Space(2.5) {
+		t.Errorf("padding %v %v", v.padX, v.padY)
+	}
+	v.setLook(ui.LightTheme(), false)
+	if v.padX != 0 || v.padY != 0 {
+		t.Errorf("an EditorBase's padding %v %v", v.padX, v.padY)
+	}
 }
 
 // TestThemeChangeLaysOut changes the theme between frames: the text is

@@ -47,6 +47,11 @@ type Theme struct {
 	// (3), and QuoteText their text, the Muted color by default.
 	QuoteBar, QuoteText ui.Color
 	QuoteBarWidth       float32
+
+	// Padding is the room around the text of an Editor, in DIPs across
+	// and down: the window theme's Space(3) and Space(2.5). An EditorBase
+	// has none, its room the app's.
+	Padding [2]float32
 }
 
 // HeadingStyle is how headings of one level look.
@@ -93,6 +98,7 @@ func defaultTheme(t *ui.Theme) Theme {
 		QuoteBar:            t.Border,
 		QuoteText:           t.TextMuted,
 		QuoteBarWidth:       3,
+		Padding:             [2]float32{t.Space(3), t.Space(2.5)},
 	}
 	for i, size := range headingSizes {
 		th.Headings[i] = HeadingStyle{Size: size, Weight: 700, Color: t.Text, Top: 0.6, Bottom: 0.25}
@@ -149,5 +155,7 @@ func resolve(th *Theme, def *Theme) Theme {
 	c(&out.QuoteBar, def.QuoteBar)
 	c(&out.QuoteText, out.Muted)
 	f(&out.QuoteBarWidth, def.QuoteBarWidth)
+	f(&out.Padding[0], def.Padding[0])
+	f(&out.Padding[1], def.Padding[1])
 	return out
 }

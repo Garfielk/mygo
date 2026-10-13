@@ -212,7 +212,8 @@ text, links, the caret and the selection; the font, size and colors of
 code, within text and in blocks, and the corners and room of blocks of
 code; each level of heading's size, weight, color and room above and
 below; the indentation of lists, the colors of their markers and check
-boxes; and the bar and text of quotations. What it leaves zero takes the
+boxes; the bar and text of quotations; and the padding of `Editor`,
+which replaces the window theme's. What it leaves zero takes the
 value of `DefaultTheme` for the window's theme, so that a theme sets only
 what it changes, and follows the window into dark mode:
 
@@ -226,7 +227,7 @@ richtext.Editor(c, doc, richtext.EditorOptions{Theme: &richtext.Theme{
 ```
 
 Lengths are in ems, times the editor's font size, so that a theme scales
-with `Font`. Changing the theme lays the text out again. The colors the
+with `Font`, but for the padding and the quotation bar's width, in DIPs. Changing the theme lays the text out again. The colors the
 editor shows go to screen readers with its runs.
 
 ## Typing at the edges of formats
