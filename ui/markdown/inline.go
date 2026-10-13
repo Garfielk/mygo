@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -83,7 +84,7 @@ func (d *Document) Inlines(i int) []Inline {
 	if b.segB > b.segA && i != d.tail {
 		at := int(d.segs[b.segA].start)
 		for _, o := range d.oldInl {
-			if o.at == at && o.text == text && !o.healed {
+			if o.at == at && o.text == text && !o.healed && slices.Equal(o.segs, d.segsOf(b)) {
 				b.inl, b.labels, b.rev = o.inl, o.labels, o.rev
 				return b.inl
 			}
@@ -1249,9 +1250,7 @@ func (ip *inlineParser) parseReference(d *Document, s string, at int) int {
 	if key == "" {
 		return 0
 	}
-	if _, ok := d.refs[key]; !ok {
-		d.refs[key] = linkRef{dest: dest, title: title, at: at}
-	}
+	d.define(definition{key, linkRef{dest: dest, title: title, at: at}})
 	return ip.pos
 }
 

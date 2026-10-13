@@ -210,7 +210,10 @@ type Document struct {
 	blocks []Block
 	segs   []seg
 	refs   map[string]linkRef
-	notes  map[string]int // footnote label → definition block
+	// defs are the link reference definitions in order, duplicates
+	// included, which take over as edits remove those before them.
+	defs  []definition
+	notes map[string]int // footnote label → definition block
 	// restart is the offset of the line where parsing restarts as text
 	// is appended: the start of the outermost block open after the last
 	// complete line, or that line's end; restartAt is the index of the
@@ -238,9 +241,25 @@ type oldInline struct {
 	at     int // the offset of the block's content
 	rev    uint32
 	text   string
+	segs   []seg // its lines, as offsets move with them
 	inl    []Inline
 	labels []string
 	healed bool
+}
+
+// definition is a link reference definition of a label.
+type definition struct {
+	key string
+	linkRef
+}
+
+// define adds a definition, which defines its label unless one before
+// it did.
+func (d *Document) define(df definition) {
+	d.defs = append(d.defs, df)
+	if _, ok := d.refs[df.key]; !ok {
+		d.refs[df.key] = df.linkRef
+	}
 }
 
 // linkRef is a link reference definition.
@@ -269,6 +288,7 @@ func (d *Document) reset() {
 	d.blocks[0].parse.open = true
 	d.blocks[0].parse.lastChild = -1
 	d.refs = map[string]linkRef{}
+	d.defs = d.defs[:0]
 	d.notes = map[string]int{}
 	d.restart, d.restartAt = 0, 1
 }

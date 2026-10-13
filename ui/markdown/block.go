@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -13,6 +14,12 @@ import (
 
 // blockState is what the parser keeps of a block while it is open.
 type blockState struct {
+	// firstLine is the offset of the line the block began on, where
+	// parsing it anew starts, though definitions may move its Start; and
+	// joined, for a table made of a paragraph's last line, is that
+	// paragraph, which parsing it anew starts with.
+	firstLine int32
+	joined    int32
 	lastChild int32
 	prev      int32
 	startLine int32
@@ -143,21 +150,20 @@ func (d *Document) parseShown(resync func(line int) bool) bool {
 func (d *Document) edit(from, to int, text string) {
 	old := d.src
 	delta := len(text) - (to - from)
-	prev, k := 0, 0
-	for j := 1; j < len(d.blocks); j = d.blocks[j].Next {
-		if lineStartOf(old, d.blocks[j].Start) > from {
+	prev := 0
+	for j, k := 1, 0; j < len(d.blocks); j = d.blocks[j].Next {
+		if int(d.blocks[j].parse.firstLine) > from {
 			break
 		}
 		prev, k = k, j
 	}
 	at, off := 1, 0
 	if prev > 0 {
-		at, off = prev, lineStartOf(old, d.blocks[prev].Start)
-	} else if k == 0 && len(d.blocks) > 1 {
-		at, off = 1, 0
+		at, off = d.restartOf(prev)
 	}
 	tail := append([]Block(nil), d.blocks[at:]...)
 	oldSegs := append([]seg(nil), d.segs...)
+	oldDefs := append([]definition(nil), d.defs...)
 	oldRefs := make(map[string]linkRef, len(d.refs))
 	for key, r := range d.refs {
 		oldRefs[key] = r
@@ -172,17 +178,17 @@ func (d *Document) edit(from, to int, text string) {
 		if line < editEnd {
 			return false
 		}
-		for j < len(tail) && (tail[j].Parent != 0 || lineStartOf(old, tail[j].Start)+delta < line) {
+		for j < len(tail) && (tail[j].Parent != 0 || int(tail[j].parse.firstLine)+delta < line) {
 			j++
 		}
-		if j < len(tail) && tail[j].parse.quiet && lineStartOf(old, tail[j].Start) >= to && lineStartOf(old, tail[j].Start)+delta == line {
+		if j < len(tail) && tail[j].parse.quiet && tail[j].parse.joined == 0 && int(tail[j].parse.firstLine) >= to && int(tail[j].parse.firstLine)+delta == line {
 			met = j
 			return true
 		}
 		return false
 	}
 	if d.parseShown(resync) {
-		splitAt := lineStartOf(old, tail[met].Start)
+		splitAt := int(tail[met].parse.firstLine)
 		shift := len(d.blocks) - (at + met)
 		for m := met; m < len(tail); m++ {
 			b := tail[m]
@@ -192,6 +198,10 @@ func (d *Document) edit(from, to int, text string) {
 			b.Next += shift
 			b.Start += delta
 			b.End += delta
+			b.parse.firstLine += int32(delta)
+			if b.parse.joined > 0 {
+				b.parse.joined += int32(shift)
+			}
 			segs := oldSegs[b.segA:b.segB]
 			b.segMark = int32(len(d.segs))
 			b.segA = b.segMark
@@ -225,15 +235,17 @@ func (d *Document) edit(from, to int, text string) {
 			}
 		}
 		d.blocks[0].Next = len(d.blocks)
-		for key, r := range oldRefs {
-			if r.at >= splitAt {
-				if _, ok := d.refs[key]; !ok {
-					r.at += delta
-					d.refs[key] = r
-				}
+		// The definitions of the blocks kept, duplicates included, which
+		// take over from those gone.
+		for _, df := range oldDefs {
+			if df.at >= splitAt {
+				df.at += delta
+				d.define(df)
 			}
 		}
-		d.restart, d.restartAt = oldRestart+delta, oldRestartAt+shift
+		if oldRestart >= splitAt {
+			d.restart, d.restartAt = oldRestart+delta, oldRestartAt+shift
+		}
 		if oldTail >= at+met {
 			d.tail = oldTail + shift
 		}
@@ -252,7 +264,7 @@ func (d *Document) truncate(at, off int) map[string]linkRef {
 	for i := at; i < len(d.blocks); i++ {
 		b := &d.blocks[i]
 		if b.inlOK && b.segB > b.segA {
-			d.oldInl = append(d.oldInl, oldInline{int(d.segs[b.segA].start), b.rev, b.text, b.inl, b.labels, b.healed})
+			d.oldInl = append(d.oldInl, oldInline{int(d.segs[b.segA].start), b.rev, b.text, slices.Clone(d.segsOf(b)), b.inl, b.labels, b.healed})
 		}
 	}
 	root := &d.blocks[0]
@@ -263,6 +275,14 @@ func (d *Document) truncate(at, off int) map[string]linkRef {
 	}
 	clear(d.blocks[at:])
 	d.blocks = d.blocks[:at]
+	k := 0
+	for _, df := range d.defs {
+		if df.at < off {
+			d.defs[k] = df
+			k++
+		}
+	}
+	d.defs = d.defs[:k]
 	var removed map[string]linkRef
 	for k, r := range d.refs {
 		if r.at >= off {
@@ -416,15 +436,28 @@ func (d *Document) parse(off, end int, resync func(line int) bool) bool {
 	d.restart, d.restartAt = off, len(d.blocks)
 	src := p.src
 	pos := off
+	// The next \n and \r, found once each, so that lines ending in one
+	// of them alone take linear time.
+	nl, cr := -1, -1
 	for pos < len(src) {
 		// The line ends at the first \n, \r or \r\n.
-		j := strings.IndexByte(src[pos:], '\n')
-		if j < 0 {
-			j = len(src) - pos
+		if nl < pos {
+			if nl = strings.IndexByte(src[pos:], '\n'); nl < 0 {
+				nl = len(src)
+			} else {
+				nl += pos
+			}
 		}
-		lineEnd, next := pos+j, pos+j+1
-		if k := strings.IndexByte(src[pos:lineEnd], '\r'); k >= 0 {
-			lineEnd = pos + k
+		if cr < pos {
+			if cr = strings.IndexByte(src[pos:], '\r'); cr < 0 {
+				cr = len(src)
+			} else {
+				cr += pos
+			}
+		}
+		lineEnd, next := nl, nl+1
+		if cr < nl {
+			lineEnd = cr
 			next = lineEnd + 1
 			if next < len(src) && src[next] == '\n' {
 				next++
@@ -474,12 +507,21 @@ func (p *blockParser) noteRestart(next int) {
 	d := p.d
 	top := d.blocks[0].parse.lastChild
 	if top > 0 && d.blocks[top].parse.open {
-		d.restart = lineStartOf(d.src, d.blocks[top].Start)
-		d.restartAt = int(top)
+		d.restartAt, d.restart = d.restartOf(int(top))
 	} else {
 		d.restart = next
 		d.restartAt = len(d.blocks)
 	}
+}
+
+// restartOf returns the block parsing anew starts with to give top-level
+// block i again, and the offset of its first line: a table made of a
+// paragraph's last line starts with the paragraph.
+func (d *Document) restartOf(i int) (int, int) {
+	if j := d.blocks[i].parse.joined; j > 0 {
+		i = int(j)
+	}
+	return i, int(d.blocks[i].parse.firstLine)
 }
 
 // quiet reports whether no block is open that a line could go into: none,
@@ -539,6 +581,7 @@ func (p *blockParser) addChild(parent int, kind Kind, start int) int {
 	b.parse.open = true
 	b.parse.lastChild = -1
 	b.parse.startLine = int32(p.lineNum)
+	b.parse.firstLine = int32(p.lineStart)
 	pb := &d.blocks[parent]
 	b.parse.prev = pb.parse.lastChild
 	pb.parse.lastChild = int32(i)
@@ -962,7 +1005,7 @@ func (p *blockParser) openNewBlocks(container *int, allMatched bool) {
 
 		case !indented && c == '<' && func() bool {
 			n = scanHTMLBlockStart(p.ln, p.firstNonspace)
-			if n == 0 && contKind != Paragraph {
+			if n == 0 && contKind != Paragraph && !(!allMatched && d.blocks[p.current].Kind == Paragraph) {
 				n = scanHTMLBlockStart7(p.ln, p.firstNonspace)
 			}
 			return n > 0
@@ -1197,10 +1240,14 @@ func (p *blockParser) mathStart(container *int) bool {
 	start := p.lineStart + p.firstNonspace
 	m := p.addChild(*container, MathBlock, start)
 	b := &p.d.blocks[m]
-	b.parse.mathBracket = close == `\\]`
+	b.parse.mathBracket = close == `\]`
 	b.parse.mathDone = done
 	bs := start + len(open)
-	if strings.Trim(body, " \t") != "" {
+	for body != "" && (body[0] == ' ' || body[0] == '\t') {
+		body, bs = body[1:], bs+1
+	}
+	body = strings.TrimRight(body, " \t")
+	if body != "" {
 		p.d.appendSeg(m, seg{start: int32(bs), end: int32(bs + len(body))})
 		b = &p.d.blocks[m]
 	}
@@ -1238,8 +1285,17 @@ func (p *blockParser) tableStart(container *int) bool {
 	var table int
 	if b.segB-b.segA > 1 {
 		b.segB--
+		first := b.parse.firstLine
 		p.current = p.finalize(cont)
+		kept := len(d.blocks) > cont
 		table = p.addChild(parent, Table, int(h.start))
+		// Its header was the paragraph's last line: parsing anew starts
+		// with the paragraph.
+		t := &d.blocks[table]
+		t.parse.firstLine, t.parse.quiet = first, false
+		if kept {
+			t.parse.joined = int32(cont)
+		}
 	} else {
 		table = cont
 		b.Kind = Table
@@ -1322,6 +1378,8 @@ func (p *blockParser) addTextToContainer(container int) {
 		if !cb.Fenced || int(cb.parse.startLine) != p.lineNum {
 			p.addLine(container)
 		}
+	case cb.Kind == MathBlock && int(cb.parse.startLine) == p.lineNum:
+		// Its opening line, which mathStart took.
 	case cb.Kind == MathBlock && !cb.parse.mathDone:
 		rest := p.ln[p.offset:]
 		if cl := cb.parse.mathClose(); true {
