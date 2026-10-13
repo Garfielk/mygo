@@ -118,11 +118,15 @@ func (clipboard) AvailableFormats() []string { return nil }
 
 type shell struct{}
 
-func (shell) OpenExternal(string) error { return errUnsupported }
-func (shell) OpenPath(string) error     { return errUnsupported }
-func (shell) ShowItemInFolder(string)   {}
-func (shell) TrashItem(string) error    { return errUnsupported }
-func (shell) Beep()                     {}
+func (shell) OpenExternal(string) error            { return errUnsupported }
+func (shell) OpenPath(string) error                { return errUnsupported }
+func (shell) ShowItemInFolder(string)              {}
+func (shell) TrashItem(string) error               { return errUnsupported }
+func (shell) Beep()                                {}
+func (shell) FileIcon(string, int) ([]byte, error) { return nil, errUnsupported }
+func (shell) OpenApplication(string) error         { return errUnsupported }
+
+func (*Backend) Applications() ([]platform.Application, error) { return nil, errUnsupported }
 
 type screen struct{}
 

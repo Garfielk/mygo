@@ -83,11 +83,17 @@ that must start instantly.
 - [The application](app.md): the lifecycle, quitting, a single instance,
   deep links, file associations, recent documents, starting at login,
   well-known directories, the jump list, browsing data and cookies.
+- [Documents](documents.md): document-based apps, a window per file, with
+  the File menu, autosave, recovery after a crash, asking to save before
+  closing and quitting, and files changed by other apps.
 - [Menus and the tray](menus.md): application, context and Dock menus,
   keyboard shortcuts and tray icons.
 - [Desktop APIs](native.md): dialogs, notifications, the clipboard, the
   shell, displays, dark mode, power, the network status, secrets, watching
   files and global shortcuts.
+- [Launchers](launchers.md): apps in the manner of Spotlight and Raycast,
+  summoned by a shortcut over every app, which find and open the apps
+  installed.
 - [Clipboard and drag data](data-transfer.md): multiple representations,
   file lists, custom formats, lazy providers, and clipboard persistence.
 - [Audio](audio.md): sound effects, streamed music and sound an app makes
