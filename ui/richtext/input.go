@@ -40,6 +40,12 @@ func (v *view) input(ev ui.InputEvent) bool {
 		return v.move(ev)
 	case ui.InputPointerUp:
 		return v.release(ev)
+	case ui.InputSelect:
+		n := v.shown.Len()
+		v.selAnchor, v.caret = max(0, min(ev.Start, n)), max(0, min(ev.End, n))
+		v.affinity = ui.TextDownstream
+		v.reveal = true
+		return true
 	case ui.InputScroll:
 		before := v.scroll
 		v.setScroll(max(0, min(v.scroll+float64(ev.DY), v.hs.top(len(v.paras))-float64(v.viewH))))

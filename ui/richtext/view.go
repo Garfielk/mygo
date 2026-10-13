@@ -757,4 +757,52 @@ func (v *view) access(n *platform.AccessNode) {
 	if v.shown.Len() == 0 {
 		n.Placeholder = v.opts.Placeholder
 	}
+	n.TextRuns = v.accessRuns(n.TextRuns[:0])
+}
+
+// accessRuns appends the runs of the text that have formats, as screen
+// readers read them: the attributes as they show, and the headings.
+func (v *view) accessRuns(out []platform.AccessTextRun) []platform.AccessTextRun {
+	for start, p := range v.shown.Paragraphs() {
+		font := v.paraFont(p.Style)
+		at := start
+		for _, r := range p.Runs {
+			n := utf8.RuneCountInString(r.Text)
+			s := v.look.span(r.Text, r.Attributes, p.Style)
+			run := platform.AccessTextRun{Start: at, End: at + n, Family: s.Font, Size: s.Size, Weight: s.Weight,
+				Italic: s.Italic, Underline: s.Underline, Strikethrough: s.Strikethrough, Link: r.Attributes.Link, Heading: p.Style.Heading}
+			if run.Family == "" && font.Family != v.base.Family {
+				run.Family = font.Family
+			}
+			if run.Size == 0 && font.Size != v.base.Size {
+				run.Size = font.Size
+			}
+			if run.Weight == 0 && font.Weight > 0 {
+				run.Weight = font.Weight
+			}
+			if s.Color.A > 0 {
+				run.Color = [4]uint8{s.Color.R, s.Color.G, s.Color.B, s.Color.A}
+			}
+			if s.Background.A > 0 {
+				run.Background = [4]uint8{s.Background.R, s.Background.G, s.Background.B, s.Background.A}
+			}
+			if run != (platform.AccessTextRun{Start: run.Start, End: run.End}) {
+				// Neighbors alike are one run, or screen readers announce a
+				// change of format that is not.
+				if k := len(out) - 1; k >= 0 && out[k].End == run.Start && sameFormat(out[k], run) {
+					out[k].End = run.End
+				} else {
+					out = append(out, run)
+				}
+			}
+			at += n
+		}
+	}
+	return out
+}
+
+// sameFormat reports whether two runs have the same formats.
+func sameFormat(a, b platform.AccessTextRun) bool {
+	a.Start, a.End, b.Start, b.End = 0, 0, 0, 0
+	return a == b
 }

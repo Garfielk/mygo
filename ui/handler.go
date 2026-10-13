@@ -36,6 +36,10 @@ const (
 	// InputScroll scrolls by DX, DY DIPs at X, Y; Precise marks
 	// touchpads, which scroll by pixels rather than by lines.
 	InputScroll
+	// InputSelect selects runes Start to End of the text an element
+	// describes to assistive technology (Element.Access), as a screen
+	// reader moves the selection of a text field of the app's own.
+	InputSelect
 )
 
 // InputEvent is input an element takes as it comes (HandleInput).
@@ -62,6 +66,8 @@ type InputEvent struct {
 	// down the content.
 	DX, DY  float32
 	Precise bool
+	// Start and End are the runes InputSelect selects.
+	Start, End int
 }
 
 // HandleInput has fn take the element's input as it comes, on the main
