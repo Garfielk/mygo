@@ -2064,6 +2064,30 @@ either.
     the editor reads back after the build, as a query typed. Separators
     are built by the diff view across both sides, over the room their
     blocks leave.
+- **Markdown** (`ui/markdown`), on ui's public API as `ui/editor` is, whose
+  tokenizers highlight its code. The parser follows cmark-gfm's two
+  phases over flat blocks and inlines with byte offsets: a block parser
+  with a stack of open blocks, line by line, closing those a line does not
+  match before adding a block, so that blocks go in document order; and
+  inlines parsed per block when first asked, with cmark's guards against
+  quadratic inputs (the bottoms of openers, backtick runs, comments and
+  math remembered unclosed). Appending text truncates the blocks from the
+  outermost block open after the last complete line (`restart`), which
+  CommonMark makes sound: no rule looks ahead, and those rewriting an
+  earlier block touch only open ones; the partial last line never decides
+  what is closed. Definitions made or unmade parse anew the inlines of the
+  blocks that looked their labels up, and the inlines of blocks parsed
+  again are reused when their text is the same. An edit parses from the
+  top-level block before it until a top-level block starts with nothing
+  open (`quiet`) where one did, and splices the old ones after, shifted.
+  Streaming completes the tail's inlines from the openers the parser left
+  (`heal.go`) and holds back lines that may still change. The view keeps
+  the document in its root's local state and the spans of each paragraph
+  by block, links as inline `Link` elements, a code block's tokens by line
+  and its text in chunks of 32 lines; it reveals text at a pace, fading it
+  by span colors and element opacity, which only paint. A `Selectable`
+  root's `CopyText` and `SelectedTexts` map paragraphs' runes back to
+  source offsets, to copy text with block separators or Markdown.
 - **Text selection** (`ui/textselection.go`). `Selectable` on a text
   selects that paragraph; on a container it gives its text descendants
   one selection. The window keeps endpoints as stable element IDs and
@@ -2075,7 +2099,10 @@ either.
   controls and `Unselectable` subtrees do not participate. A drag near
   a scroll edge asks for frames until scrolling stops. Inline children
   contribute to their paragraph once, and preparation waits for their
-  final text so a rebuild preserves the selection.
+  final text so a rebuild preserves the selection. A paragraph whose text
+  only grew at its end keeps the selection, as a reply streaming in. A
+  container's `CopyText` makes what Copy writes from the parts
+  `SelectedTexts` returns: each paragraph's ID, text and runes selected.
 - **Tables** (`ui/table.go`, `ui/editable.go`). A table's rows are a
   `List`'s that scrolls both ways: the list lays its rows out at least as
   wide as the columns ask (`rowMinW`), and the header, outside the list,
