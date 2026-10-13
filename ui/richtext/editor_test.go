@@ -330,3 +330,39 @@ func TestRichTextTypingIsOneStep(t *testing.T) {
 		t.Fatalf("one undo left %q", got)
 	}
 }
+
+// TestRichTextCursor checks the pointer's shape: an arrow over a task's
+// box, which a click checks, an I-beam over text and a hand over links.
+func TestRichTextCursor(t *testing.T) {
+	doc := NewDocument(TextOf(
+		Paragraph{Runs: []Run{{Text: "milk"}}, Style: ParagraphStyle{List: Tasks}},
+		Paragraph{Runs: []Run{{Text: "see "}, {Text: "the site", Attributes: Attributes{Link: "https://example.com"}}}},
+	))
+	tt, _ := richTester(t, doc)
+	find := func(want ui.Cursor) (float32, float32, bool) {
+		for y := float32(2); y < 80; y += 2 {
+			for x := float32(0); x < 200; x += 2 {
+				tt.Move(x, y)
+				if tt.Cursor() == want {
+					return x, y, true
+				}
+			}
+		}
+		return 0, 0, false
+	}
+	x, y, ok := find(ui.CursorDefault)
+	if !ok {
+		t.Fatal("no arrow over the task's box")
+	}
+	tt.ClickAt(x, y)
+	if !doc.Text().ParagraphStyleAt(0).Checked {
+		t.Fatalf("a click where the arrow shows doesn't check the task")
+	}
+	tt.Move(x+60, y)
+	if got := tt.Cursor(); got != ui.CursorText {
+		t.Fatalf("cursor over the task's text %v, want an I-beam", got)
+	}
+	if _, _, ok := find(ui.CursorPointer); !ok {
+		t.Fatal("no hand over the link")
+	}
+}

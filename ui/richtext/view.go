@@ -123,7 +123,9 @@ type view struct {
 	dragStart  [2]int
 	pressMods  ui.Modifiers
 	pressLink  string
-	hoverLink  bool
+	// cursor is the pointer's shape where it hovers: an arrow over task
+	// boxes and the scroll bar, a hand over links, an I-beam over text.
+	cursor ui.Cursor
 	thumb      bool
 	thumbGrab  float32
 	focused    bool
@@ -184,7 +186,7 @@ func build(c *ui.Context, doc *Document, options []EditorOptions, styled bool) u
 	}
 	t := c.Theme()
 	e := ui.Box(c).Focusable().Clip()
-	v := ui.Local(e, "richtext", func() view { return view{} })
+	v := ui.Local(e, "richtext", func() view { return view{cursor: ui.CursorText} })
 	if v.doc != doc {
 		*v = view{doc: doc, reveal: true}
 		doc.lock()
@@ -220,11 +222,7 @@ func build(c *ui.Context, doc *Document, options []EditorOptions, styled bool) u
 		e.HandleTextInput(v)
 	}
 	e.HandleInput(v.input)
-	if v.hoverLink {
-		e.Cursor(ui.CursorPointer)
-	} else {
-		e.Cursor(ui.CursorText)
-	}
+	e.Cursor(v.cursor)
 	e.Draw(v.paint)
 	e.ContextMenu(v.menu)
 	if styled {

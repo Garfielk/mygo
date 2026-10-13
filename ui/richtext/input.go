@@ -548,10 +548,14 @@ func (v *view) move(ev ui.InputEvent) bool {
 	}
 	x, y := v.contentPoint(ev.X, ev.Y)
 	if !v.dragging {
-		i, _ := v.positionAt(x, y)
-		hover := i < v.shown.Len() && v.shown.AttributesAt(i).Link != "" && !v.overScrollbar(ev.X)
-		if hover != v.hoverLink {
-			v.hoverLink = hover
+		cursor := ui.CursorText
+		if _, box := v.taskBox(x, y); box || v.overScrollbar(ev.X) {
+			cursor = ui.CursorDefault
+		} else if i, _ := v.positionAt(x, y); i < v.shown.Len() && v.shown.AttributesAt(i).Link != "" {
+			cursor = ui.CursorPointer
+		}
+		if cursor != v.cursor {
+			v.cursor = cursor
 			return true
 		}
 		return false
