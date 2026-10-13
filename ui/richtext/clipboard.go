@@ -77,7 +77,31 @@ func encodeClip(t Text) []byte {
 	}
 	copies.Store(name, t)
 	lastCopy.Store(name)
-	c := clipText{Copy: name}
+	c := clipOf(t)
+	c.Copy = name
+	b, _ := json.Marshal(c)
+	return b
+}
+
+// MarshalJSON writes t as JSON, as the clipboard's Format holds it, to
+// save it: paragraphs of a style each, of runs of text and attributes.
+// Attachments keep their names, URLs and sizes; images and drawings are
+// the app's to save.
+func (t Text) MarshalJSON() ([]byte, error) { return json.Marshal(clipOf(t)) }
+
+// UnmarshalJSON reads what MarshalJSON wrote.
+func (t *Text) UnmarshalJSON(b []byte) error {
+	var c clipText
+	if err := json.Unmarshal(b, &c); err != nil {
+		return err
+	}
+	*t = c.text()
+	return nil
+}
+
+// clipOf returns the JSON form of t.
+func clipOf(t Text) clipText {
+	var c clipText
 	for _, p := range t.Paragraphs() {
 		cp := clipParagraph{Style: p.Style}
 		for _, r := range p.Runs {
@@ -100,8 +124,7 @@ func encodeClip(t Text) []byte {
 		}
 		c.Paragraphs = append(c.Paragraphs, cp)
 	}
-	b, _ := json.Marshal(c)
-	return b
+	return c
 }
 
 // decodeClip returns the text of the clipboard's format.
@@ -115,6 +138,14 @@ func decodeClip(b []byte) (Text, bool) {
 			return t.(Text), true
 		}
 	}
+	if len(c.Paragraphs) == 0 {
+		return Text{}, false
+	}
+	return c.text(), true
+}
+
+// text returns the text of the JSON form.
+func (c clipText) text() Text {
 	var paras []Paragraph
 	for _, cp := range c.Paragraphs {
 		p := Paragraph{Style: cp.Style}
@@ -134,9 +165,9 @@ func decodeClip(b []byte) (Text, bool) {
 		paras = append(paras, p)
 	}
 	if len(paras) == 0 {
-		return Text{}, false
+		return Text{}
 	}
-	return TextOf(paras...), true
+	return TextOf(paras...)
 }
 
 // PlainText returns t as plain text, its attachments left out.

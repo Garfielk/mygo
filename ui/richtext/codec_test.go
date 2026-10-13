@@ -134,3 +134,18 @@ func TestCopyPaste(t *testing.T) {
 		t.Fatalf("pasted matching the style %q", got)
 	}
 }
+
+func TestJSON(t *testing.T) {
+	in := sample()
+	b, err := in.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Text
+	if err := out.UnmarshalJSON(b); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Equal(in) {
+		t.Fatalf("%q, want %q", runsOf(out), runsOf(in))
+	}
+}
