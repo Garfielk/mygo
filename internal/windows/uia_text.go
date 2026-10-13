@@ -5,6 +5,7 @@ package windows
 import (
 	"math"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"unicode"
@@ -92,11 +93,20 @@ func (r *textRange) release() int32 {
 }
 
 // text returns the runes of the element's text.
-func (r *textRange) text() []rune { return []rune(r.e.n.Value) }
+func (r *textRange) text() []rune { return r.e.runes() }
+
+// runes returns the runes of the element's value, decoded once for each
+// value it has, as ranges ask for them call after call.
+func (e *uiaElement) runes() []rune {
+	if e.runesOf != e.n.Value || e.textRunes == nil {
+		e.runesOf, e.textRunes = e.n.Value, []rune(e.n.Value)
+	}
+	return e.textRunes
+}
 
 // clamp keeps the range within the text, start before end.
 func (r *textRange) clamp() {
-	n := len([]rune(r.e.n.Value))
+	n := len(r.e.runes())
 	r.start, r.end = max(0, min(r.start, n)), max(0, min(r.end, n))
 	if r.end < r.start {
 		r.end = r.start
@@ -148,7 +158,7 @@ func textProviderMethods() []uintptr {
 			if e == nil {
 				return hr
 			}
-			*(*uintptr)(native(p)) = rangeArray(newTextRange(e, 0, len([]rune(e.n.Value))))
+			*(*uintptr)(native(p)) = rangeArray(newTextRange(e, 0, len(e.runes())))
 			return sOK
 		}),
 		cb(func(this, child, p uintptr) uintptr { // RangeFromChild
@@ -180,7 +190,7 @@ func textProviderMethods() []uintptr {
 				*(*uintptr)(native(p)) = 0
 				return hr
 			}
-			return outRange(p, newTextRange(e, 0, len([]rune(e.n.Value))))
+			return outRange(p, newTextRange(e, 0, len(e.runes())))
 		}),
 		cb(func(this, p uintptr) uintptr { // get_SupportedTextSelection
 			*(*int32)(native(p)) = 1 // SupportedTextSelection_Single
@@ -201,12 +211,8 @@ func isBoundary(text []rune, runs []platform.AccessTextRun, i, unit int) bool {
 	case unitCharacter:
 		return true
 	case unitFormat:
-		for _, r := range runs {
-			if r.Start == i || r.End == i {
-				return true
-			}
-		}
-		return false
+		k := sort.Search(len(runs), func(k int) bool { return runs[k].End >= i })
+		return k < len(runs) && (runs[k].Start == i || runs[k].End == i)
 	case unitWord:
 		a, b := text[i-1], text[i]
 		return !unicode.IsSpace(b) && (unicode.IsSpace(a) || wordClass(a) != wordClass(b)) || a == '\n'
@@ -230,12 +236,34 @@ func wordClass(r rune) int {
 // next returns the next start of a unit after i, or the end; prev the
 // last one before i, or 0.
 func next(text []rune, runs []platform.AccessTextRun, i, unit int) int {
+	if unit == unitFormat {
+		// The nearest edge of a run after i, found by halves.
+		k := sort.Search(len(runs), func(k int) bool { return runs[k].End > i })
+		if k < len(runs) {
+			if runs[k].Start > i {
+				return min(runs[k].Start, len(text))
+			}
+			return min(runs[k].End, len(text))
+		}
+		return len(text)
+	}
 	for i++; i < len(text) && !isBoundary(text, runs, i, unit); i++ {
 	}
 	return min(i, len(text))
 }
 
 func prev(text []rune, runs []platform.AccessTextRun, i, unit int) int {
+	if unit == unitFormat {
+		// The nearest edge of a run before i.
+		k := sort.Search(len(runs), func(k int) bool { return runs[k].Start >= i }) - 1
+		if k >= 0 {
+			if runs[k].End < i {
+				return runs[k].End
+			}
+			return runs[k].Start
+		}
+		return 0
+	}
 	for i--; i > 0 && !isBoundary(text, runs, i, unit); i-- {
 	}
 	return max(i, 0)
@@ -362,7 +390,7 @@ func (r *textRange) formatOf(attr int) (variant, bool) {
 		v, ok := value(run)
 		if at == start {
 			first, firstOK = v, ok
-		} else if ok != firstOK || v != first {
+		} else if ok != firstOK || !sameVariant(v, first) {
 			if v.VT == vtBSTR {
 				procSysFreeString.Call(uintptr(v.Val))
 			}
@@ -389,10 +417,9 @@ func (r *textRange) formatOf(attr int) (variant, bool) {
 
 // runAt returns the run of runs holding rune i, or one without formats.
 func runAt(runs []platform.AccessTextRun, i int) platform.AccessTextRun {
-	for _, r := range runs {
-		if i >= r.Start && i < r.End {
-			return r
-		}
+	k := sort.Search(len(runs), func(k int) bool { return runs[k].End > i })
+	if k < len(runs) && runs[k].Start <= i {
+		return runs[k]
 	}
 	return platform.AccessTextRun{}
 }

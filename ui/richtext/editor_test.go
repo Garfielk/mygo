@@ -318,3 +318,15 @@ func TestRichTextEdgesAsNSTextView(t *testing.T) {
 		})
 	}
 }
+
+// TestRichTextTypingIsOneStep types a word and undoes it whole, as
+// NSTextView and TextArea do.
+func TestRichTextTypingIsOneStep(t *testing.T) {
+	doc := NewDocument(NewText(""))
+	tt, _ := richTester(t, doc)
+	typeRunes(tt, "abc")
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if got := doc.Text().String(); got != "" {
+		t.Fatalf("one undo left %q", got)
+	}
+}

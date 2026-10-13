@@ -230,11 +230,11 @@ func (v *view) paste(matchStyle bool) {
 		}
 		return
 	}
-	a, z := v.selection()
 	v.record(false)
 	d := v.doc
 	d.lock()
 	v.lockedSync()
+	a, z := v.selection() // as the sync moved it
 	v.lockedPublish()
 	v.lockedEdit(func(e *Edit) { e.Replace(a, z, t) })
 	caret := a + t.Len()

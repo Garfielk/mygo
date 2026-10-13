@@ -118,7 +118,10 @@ func (v *view) paintMarker(p *ui.Painter, i int, st ParagraphStyle, pv *paraView
 		return
 	}
 	mark := v.marker(i, st)
-	ml := ui.ShapeText(mark, font, 0)
+	if pv.markerLayout == nil || pv.marker != mark {
+		pv.marker, pv.markerLayout = mark, ui.ShapeText(mark, font, 0)
+	}
+	ml := pv.markerLayout
 	mw, _ := ml.Size()
 	mx := x - mw - look.indent*0.25
 	if st.List == Bullets {

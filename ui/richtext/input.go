@@ -49,7 +49,8 @@ func (v *view) input(ev ui.InputEvent) bool {
 	case ui.InputScroll:
 		before := v.scroll
 		v.setScroll(max(0, min(v.scroll+float64(ev.DY), v.hs.top(len(v.paras))-float64(v.viewH))))
-		return v.scroll != before || ev.DY != 0 && v.hs.top(len(v.paras)) > float64(v.viewH)
+		// At an end, the wheel goes on to the containers around.
+		return v.scroll != before
 	}
 	return false
 }

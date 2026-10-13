@@ -90,6 +90,8 @@ func (v *view) lockedEdit(fn func(e *Edit)) {
 		d.edit(false, fn)
 	default:
 		d.edit(v.mode == typingStep, fn)
+		// Typing that starts a step lets the typing after it join it.
+		d.coalesce = v.coalesce
 	}
 	v.mode = sameStep
 	if d.version != before {

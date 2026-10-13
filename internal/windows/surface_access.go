@@ -191,14 +191,17 @@ type uiaIface struct {
 
 // uiaElement is a node of the tree as UI Automation sees it, or the root.
 type uiaElement struct {
-	ifaces   [uiaIfaces]uiaIface
-	refs     int32
-	tree     *uiaTree
-	root     bool
-	dead     bool
-	n        platform.AccessNode
-	parent   *uiaElement
-	children []*uiaElement
+	ifaces [uiaIfaces]uiaIface
+	refs   int32
+	tree   *uiaTree
+	root   bool
+	dead   bool
+	n      platform.AccessNode
+	// textRunes are the runes of n.Value, runesOf the value they are of.
+	textRunes []rune
+	runesOf   string
+	parent    *uiaElement
+	children  []*uiaElement
 }
 
 // uiaTree is what UI Automation sees of a surface.

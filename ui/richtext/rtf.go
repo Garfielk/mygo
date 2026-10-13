@@ -51,8 +51,8 @@ type rtfReader struct {
 	// inst is a field's instruction; marker is a paragraph's list text.
 	inst   string
 	marker strings.Builder
-	listed     bool
-	level      int
+	listed bool
+	level  int
 }
 
 // flush ends the run being read.
@@ -232,7 +232,9 @@ func (r *rtfReader) control(word string, num int, hasNum bool) {
 	case "ilvl":
 		r.level = max(0, num)
 	case "par", "line", "sect", "page":
-		r.endParagraph(true)
+		if !st.skip && !st.list && st.field != "inst" {
+			r.endParagraph(true)
+		}
 	case "pard":
 		st.para = ParagraphStyle{}
 	case "ql", "qj":

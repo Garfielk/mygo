@@ -92,13 +92,15 @@ type view struct {
 	// width is the content's, which the layouts wrap at; padX and padY
 	// the room around the text in the element.
 	width, viewH float32
-	padX, padY   float32
-	rect         ui.Rect
-	scroll       float64
-	anchor       int
-	anchorOff    float64
-	reveal       bool
-	first, last  int
+	// laidLook is the look the layouts were made in.
+	laidLook    lookKey
+	padX, padY  float32
+	rect        ui.Rect
+	scroll      float64
+	anchor      int
+	anchorOff   float64
+	reveal      bool
+	first, last int
 	// The selection, in runes: anchor and caret, and the caret's visual
 	// edge.
 	selAnchor, caret int
@@ -147,15 +149,18 @@ const (
 // runs, style and composition it was made of, the UTF-16 offset of each of
 // its runes, and its height with the room around it, 0 until laid out.
 type paraView struct {
-	layout  *ui.TextLayout
-	units   []int
-	id      uint64
-	runs    *attrRun
-	nruns   int
-	style   ParagraphStyle
-	compose string
-	at      int
-	h       float32
+	layout *ui.TextLayout
+	units  []int
+	// marker is the list marker painted beside the paragraph, laid out.
+	marker       string
+	markerLayout *ui.TextLayout
+	id           uint64
+	runs         *attrRun
+	nruns        int
+	style        ParagraphStyle
+	compose      string
+	at           int
+	h            float32
 }
 
 // look is how the text of an editor looks: its font and the theme's
@@ -170,7 +175,7 @@ type look struct {
 	// width is the room of the paragraph being laid out, which
 	// attachments shrink to.
 	width    float32
-	tagStyle          func(tag string, s *ui.Span)
+	tagStyle func(tag string, s *ui.Span)
 }
 
 func build(c *ui.Context, doc *Document, options []EditorOptions, styled bool) ui.Element {
@@ -383,6 +388,18 @@ func (v *view) paraFont(st ParagraphStyle) ui.Font {
 		f.Size *= 0.92
 	}
 	return f
+}
+
+// lookKey is what of the look the layouts of paragraphs are made of.
+type lookKey struct {
+	base                    ui.Font
+	text, muted, link, code ui.Color
+	tags                    bool
+}
+
+func (v *view) lookKey() lookKey {
+	l := &v.look
+	return lookKey{base: v.base, text: l.text, muted: l.muted, link: l.link, code: l.code, tags: l.tagStyle != nil}
 }
 
 // headingScale is how much larger than the text a heading of level is.
@@ -676,7 +693,9 @@ func (v *view) setScroll(y float64) {
 // layout lays out the paragraphs in view of a content box w×h, and those
 // the caret is in when it is to be revealed.
 func (v *view) layout(w, h float32) {
-	if w != v.width {
+	if key := v.lookKey(); w != v.width || key != v.laidLook {
+		// Another width, font or theme: every paragraph anew.
+		v.laidLook = key
 		for i := range v.paras {
 			v.paras[i] = paraView{}
 		}
