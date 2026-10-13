@@ -197,19 +197,6 @@ func (ip *inlineParser) emailLinks(n int32, inLink bool) {
 		case Link, Image:
 			continue
 		case Text:
-			// Join the text after it.
-			for nx := nd.next; nx >= 0 && ip.nodes[nx].kind == Text; nx = ip.nodes[c].next {
-				nn := ip.nodes[nx]
-				nd = &ip.nodes[c]
-				if nd.text == ip.s[nd.start:nd.end] && nn.text == ip.s[nn.start:nn.end] && nd.end == nn.start {
-					nd.text = ip.s[nd.start:nn.end]
-				} else {
-					nd.text += nn.text
-				}
-				nd.end = nn.end
-				nd.plain = false
-				ip.unlink(nx)
-			}
 			if strings.IndexByte(ip.nodes[c].text, '@') >= 0 {
 				ip.splitEmails(c)
 			}

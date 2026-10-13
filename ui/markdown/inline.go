@@ -200,6 +200,7 @@ func (ip *inlineParser) run(s string) {
 		ip.parseInline()
 	}
 	ip.processEmphasis(0, true)
+	ip.joinTexts(0)
 	if ip.ext&ExtAutolinks != 0 && strings.IndexByte(s, '@') >= 0 {
 		ip.emailLinks(0, false)
 	}
@@ -1237,14 +1238,6 @@ func (ip *inlineParser) flatten(d *Document, block, base, healFrom int) []Inline
 			if nd.kind == Text && nd.text == "" {
 				continue
 			}
-			// Text after text joins it.
-			if nd.kind == Text && len(out) > 0 {
-				if l := &out[len(out)-1]; l.Kind == Text && l.Next == len(out) && n == ip.nodes[c].parent && ip.prevIsText(c) {
-					l.Text += nd.text
-					l.End = srcOf(nd.end)
-					continue
-				}
-			}
 			i := len(out)
 			out = append(out, Inline{Kind: nd.kind, Text: nd.text, Dest: nd.dest, Title: nd.title, Start: srcOf(nd.start), End: srcOf(nd.end), Auto: nd.auto, Display: nd.display})
 			if nd.end > healFrom && (nd.kind == Link || nd.kind == Image) {
@@ -1258,13 +1251,55 @@ func (ip *inlineParser) flatten(d *Document, block, base, healFrom int) []Inline
 	return out
 }
 
-// prevIsText reports whether the node before c is text that was added.
-func (ip *inlineParser) prevIsText(c int32) bool {
-	for p := ip.nodes[c].prev; p >= 0; p = ip.nodes[p].prev {
-		if ip.nodes[p].kind == Text && ip.nodes[p].text == "" {
+// joinTexts joins the runs of text among the children of node n, and
+// below it, into one node each: a slice of the subject when their texts
+// are its bytes one after another, else the texts joined once, so that a
+// run of many, as delimiters left unmatched, takes linear time.
+func (ip *inlineParser) joinTexts(n int32) {
+	for c := ip.nodes[n].first; c >= 0; c = ip.nodes[c].next {
+		if ip.nodes[c].kind != Text {
+			ip.joinTexts(c)
 			continue
 		}
-		return ip.nodes[p].kind == Text
+		last := c
+		for nx := ip.nodes[c].next; nx >= 0 && ip.nodes[nx].kind == Text; nx = ip.nodes[nx].next {
+			last = nx
+		}
+		if last == c {
+			continue
+		}
+		first := &ip.nodes[c]
+		exact := true
+		var b strings.Builder
+		for k := c; ; k = ip.nodes[k].next {
+			nd := &ip.nodes[k]
+			if nd.text != ip.s[nd.start:min(nd.end, len(ip.s))] || k != c && nd.start != ip.nodes[nd.prev].end {
+				exact = false
+			}
+			if k == last {
+				break
+			}
+		}
+		end := ip.nodes[last].end
+		if exact {
+			first.text = ip.s[first.start:end]
+		} else {
+			for k := c; ; k = ip.nodes[k].next {
+				b.WriteString(ip.nodes[k].text)
+				if k == last {
+					break
+				}
+			}
+			first.text = b.String()
+		}
+		first.end, first.plain = end, false
+		for k := ip.nodes[c].next; k >= 0; {
+			nx := ip.nodes[k].next
+			ip.unlink(k)
+			if k == last {
+				break
+			}
+			k = nx
+		}
 	}
-	return false
 }

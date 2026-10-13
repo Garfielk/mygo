@@ -99,3 +99,31 @@ func TestPathological(t *testing.T) {
 		}
 	}
 }
+
+// TestLinearTime checks that inputs quadratic in parsers without cmark's
+// guards take about four times as long for four times as much, rather
+// than sixteen, so that a regression shows on fast machines too.
+func TestLinearTime(t *testing.T) {
+	timeOf := func(src string) time.Duration {
+		best := time.Duration(1 << 62)
+		for range 3 {
+			start := time.Now()
+			_ = Parse(src).HTML()
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	for name, unit := range map[string]string{
+		"mismatched openers": "*a_ ",
+		"emphasis openers":   "*a ",
+		"unclosed links":     "[a](<b",
+		"brackets":           "[",
+		"backticks":          "`a``",
+		"escapes":            `\*`,
+	} {
+		small, large := timeOf(strings.Repeat(unit, 5000)), timeOf(strings.Repeat(unit, 20000))
+		if large > 10*small && large > 20*time.Millisecond {
+			t.Errorf("%s: %v for 5000, %v for 20000", name, small, large)
+		}
+	}
+}
