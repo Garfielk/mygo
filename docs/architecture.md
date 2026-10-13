@@ -2187,8 +2187,12 @@ either.
   by block, links as inline `Link` elements, a code block's tokens by line
   and its text in chunks of 32 lines; it reveals text at a pace, fading it
   by span colors and element opacity, which only paint. A `Selectable`
-  root's `CopyText` and `SelectedTexts` map paragraphs' runes back to
-  source offsets, to copy text with block separators or Markdown.
+  root's `CopyData` and `SelectedTexts` map paragraphs' runes back to
+  source offsets, to copy text with block separators, Markdown, and the
+  HTML of that Markdown parsed again, which `ui/richtext` pastes with its
+  formatting, as it reads Markdown with the same parser
+  (`ParseMarkdown`). Links open in the system only when `ui.SafeToOpen`
+  allows them, in both.
 - **Rich text** (`ui/richtext`). Package `richtext` edits attributed text
   on ui's public API, as `ui/editor` does: a focusable box with a text
   input client, `HandleInput`, `Draw`, `Access` and its own scrolling, and
@@ -2242,7 +2246,7 @@ either.
   contribute to their paragraph once, and preparation waits for their
   final text so a rebuild preserves the selection. A paragraph whose text
   only grew at its end keeps the selection, as a reply streaming in. A
-  container's `CopyText` makes what Copy writes from the parts
+  container's `CopyData` makes what Copy writes from the parts
   `SelectedTexts` returns: each paragraph's ID, text and runes selected.
 - **Tables** (`ui/table.go`, `ui/editable.go`). A table's rows are a
   `List`'s that scrolls both ways: the list lays its rows out at least as

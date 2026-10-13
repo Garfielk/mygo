@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 	"time"
+
+	transfer "github.com/egoist/mygo/transfer"
 )
 
 func followTester(s *ListState, n *int, last *float32, below *float32) (*Tester, *time.Time) {
@@ -204,17 +206,17 @@ func TestReviewFollowStreamInvariants(t *testing.T) {
 	}
 }
 
-func TestReviewSelectionGrowAndCopyText(t *testing.T) {
+func TestReviewSelectionGrowAndCopyData(t *testing.T) {
 	a, b := "Alpha beta", "Gamma"
 	var parts []SelectedText
 	tt := coreNewTester(func(c *context) {
-		coreColumn(c).Selectable().Padding(12).Gap(8).CopyText(func(p []SelectedText) string {
+		coreColumn(c).Selectable().Padding(12).Gap(8).CopyData(func(p []SelectedText) transfer.Data {
 			parts = p
 			s := ""
 			for _, x := range p {
 				s += string([]rune(x.Text)[x.Start:x.End]) + "|"
 			}
-			return s
+			return transfer.TextData(s)
 		}).Children(func() {
 			coreText(c, a)
 			coreText(c, b)

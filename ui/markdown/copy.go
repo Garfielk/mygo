@@ -6,6 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
@@ -42,6 +43,28 @@ func (st *viewState) copyText(parts []ui.SelectedText) string {
 		prev = inf
 	}
 	return b.String()
+}
+
+// copyData returns the selection as Copy puts it on the clipboard: as
+// text, as HTML and as Markdown.
+func (st *viewState) copyData(parts []ui.SelectedText) transfer.Data {
+	md := st.copyMarkdown(parts)
+	d := parser.New(st.doc.Extensions())
+	d.Set(md)
+	return transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.Text, []byte(st.copyText(parts))),
+		transfer.Bytes(transfer.HTML, []byte(`<meta charset="utf-8">`+d.HTML())),
+		transfer.Bytes(transfer.Markdown, []byte(md)),
+	))
+}
+
+// markdownData returns Markdown as Copy as Markdown puts it on the
+// clipboard: as text, and as Markdown.
+func markdownData(md string) transfer.Data {
+	return transfer.New(transfer.NewItem(
+		transfer.Bytes(transfer.Text, []byte(md)),
+		transfer.Bytes(transfer.Markdown, []byte(md)),
+	))
 }
 
 func runeSlice(s string, from, to int) string {

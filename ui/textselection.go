@@ -365,8 +365,8 @@ func (rt *engine) textSelectionCommand(s *state, name string) bool {
 		if !selected || rt.selection.scope != s.textScope {
 			break
 		}
-		if sc := rt.states[s.textScope]; sc != nil && sc.copyText != nil {
-			rt.host.writeClipboard(sc.copyText(rt.selectedTexts(s.textScope)))
+		if sc := rt.states[s.textScope]; sc != nil && sc.copyData != nil {
+			rt.host.writeClipboardData(sc.copyData(rt.selectedTexts(s.textScope)))
 			break
 		}
 		var out strings.Builder

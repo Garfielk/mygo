@@ -104,7 +104,9 @@ in this way.
 A view's text is one selection across its blocks, as in a browser. Copy
 puts the selected text on the clipboard, with blank lines between
 paragraphs, a list's items on lines of their own and a table's cells
-separated by tabs. The context menu's Copy as Markdown, and Shift+Cmd+C
+separated by tabs; as HTML, so that it pastes with its formatting into a
+[rich text editor](rich-text-editor.md), mail or a word processor; and as
+Markdown (`transfer.Markdown`). The context menu's Copy as Markdown, and Shift+Cmd+C
 (Shift+Ctrl+C on Linux and Windows), copy the source of the selection,
 completing the emphasis, code and links it cuts through, or the whole
 document when nothing is selected. Text keeps its selection as a reply
@@ -115,8 +117,8 @@ the view, as one across a chat's messages.
 
 ## Links and images
 
-Links to `http`, `https` and `mailto` addresses open as a
-[link](link.md)'s do, and show their address in a tooltip; a path
+Links to `http`, `https` and `mailto` addresses (`ui.SafeToOpen`, as the
+rich text editor opens them) open as a [link](link.md)'s do, and show their address in a tooltip; a path
 without a scheme goes there in the router around the view; `#a-heading`
 scrolls to the heading of that anchor (`Slug`); and links of other
 schemes, as `javascript:`, do nothing. `OnLink` handles every click

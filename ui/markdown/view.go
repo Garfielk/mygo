@@ -62,9 +62,11 @@ type Options struct {
 
 // View shows src, finished Markdown, as it reads: CommonMark and what
 // Options.Extensions add, parsed again only where src changed since the
-// last frame. Its text is selectable, copied as text or, with the context
-// menu's Copy as Markdown (Shift+Cmd+C, Shift+Ctrl+C on Linux and
-// Windows), as Markdown. o may be nil.
+// last frame. Its text is selectable, copied as text, as HTML, which
+// keeps its formatting where it is pasted (a rich text editor, mail, a
+// word processor), and as Markdown (transfer.Markdown), or, with the
+// context menu's Copy as Markdown (Shift+Cmd+C, Shift+Ctrl+C on Linux and
+// Windows), as Markdown's text. o may be nil.
 //
 //	markdown.View(c, app.readme, &app.md)
 func View(c *ui.Context, src string, o *Options) ui.Element {
@@ -164,15 +166,15 @@ func build(c *ui.Context, src string, o *Options, streaming bool) ui.Element {
 	}
 	if !o.ShareSelection {
 		root.Selectable()
-		root.CopyText(st.copyText)
+		root.CopyData(st.copyData)
 		root.ContextMenu(func(m *ui.Menu) {
 			m.EditItems()
 			if m.Item("Copy as Markdown").Chosen() {
-				c.WriteClipboard(st.copyMarkdown(root.SelectedTexts()))
+				c.Services().WriteClipboardData(markdownData(st.copyMarkdown(root.SelectedTexts())))
 			}
 		})
 		if root.FocusWithin() && root.Shortcut(ui.Cmd|ui.Shift, ui.KeyC) {
-			c.WriteClipboard(st.copyMarkdown(root.SelectedTexts()))
+			c.Services().WriteClipboardData(markdownData(st.copyMarkdown(root.SelectedTexts())))
 		}
 	}
 	st.elems = st.elems[:0]
@@ -452,22 +454,17 @@ func (st *viewState) link(c *ui.Context, in *parser.Inline, children func()) {
 }
 
 // linkAllowed reports whether a link's destination opens without
-// OnLink: an http, https or mailto address, or, in a router, a path
-// without a scheme, which goes there. Outside a router, a path would open
-// as a file or a program, so it does nothing.
+// OnLink: one ui.SafeToOpen allows, or, in a router, a path without a
+// scheme, which goes there. Outside a router, a path would open as a file
+// or a program, so it does nothing.
 func linkAllowed(dest string, router bool) bool {
 	if strings.ContainsAny(dest, "\\\x00") || strings.HasPrefix(dest, "//") {
 		return false
 	}
-	i := strings.IndexAny(dest, ":/?#")
-	if i < 0 || dest[i] != ':' {
+	if i := strings.IndexAny(dest, ":/?#"); i < 0 || dest[i] != ':' {
 		return router
 	}
-	switch strings.ToLower(dest[:i]) {
-	case "http", "https", "mailto":
-		return true
-	}
-	return false
+	return ui.SafeToOpen(dest)
 }
 
 // headingNamed returns the heading whose slug, as GitHub makes it, is

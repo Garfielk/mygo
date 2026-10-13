@@ -577,9 +577,9 @@ type state struct {
 	textAdapter *textInputAdapter
 	caret       Rect
 	takesText   bool
-	// copyText is what a Selectable container's selection copies as
-	// (CopyText).
-	copyText func(parts []SelectedText) string
+	// copyData is what a Selectable container's selection copies as
+	// (CopyData).
+	copyData func(parts []SelectedText) transfer.Data
 	// scope is the dialog the element was in, 0 for none, and anchor the
 	// element it was a popover of (AttachTo, PopoverBase).
 	scope, anchor uint64

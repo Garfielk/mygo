@@ -46,8 +46,9 @@ order the paragraphs were built. Select All selects the whole container,
 including built paragraphs outside its viewport. Inline text and links
 inside a paragraph are copied as part of that paragraph.
 
-`CopyText` on the container sets what Copy writes from the parts of the
-paragraphs selected, as a document joins them with blank lines, and
+`CopyData` on the container sets what Copy writes from the parts of the
+paragraphs selected, as a document joins them with blank lines as text
+and writes HTML too to keep their formatting, and
 `SelectedTexts` returns those parts, for a menu item copying them
 otherwise. A paragraph whose text grows at its end keeps the selection.
 
