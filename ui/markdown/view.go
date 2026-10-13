@@ -358,6 +358,7 @@ func (st *viewState) para(i int, base spanStyle) *para {
 		st.paras = append(st.paras, paraCache{})
 	}
 	b := st.doc.Block(i)
+	st.doc.Inlines(i) // their revision
 	pc := &st.paras[i]
 	fading := st.fade != nil && st.fade(max(b.End-1, b.Start)) < 1
 	if pc.ok && pc.start == b.Start && pc.end == b.End && pc.kind == b.Kind && pc.rev == b.rev && pc.base == base && !pc.p.fading && !fading && !b.healed {
@@ -435,7 +436,7 @@ func (st *viewState) link(c *ui.Context, in *Inline, children func()) {
 		if l.Clicked() {
 			st.scrollTo = st.headingNamed(dest[1:])
 		}
-	case linkAllowed(dest):
+	case linkAllowed(dest, c.Router() != nil):
 		l = ui.Link(c, "", dest)
 	default:
 		l = ui.Link(c, "", "")
@@ -450,11 +451,16 @@ func (st *viewState) link(c *ui.Context, in *Inline, children func()) {
 }
 
 // linkAllowed reports whether a link's destination opens without
-// OnLink: an http, https or mailto address, or a path without a scheme.
-func linkAllowed(dest string) bool {
+// OnLink: an http, https or mailto address, or, in a router, a path
+// without a scheme, which goes there. Outside a router, a path would open
+// as a file or a program, so it does nothing.
+func linkAllowed(dest string, router bool) bool {
+	if strings.ContainsAny(dest, "\\\x00") || strings.HasPrefix(dest, "//") {
+		return false
+	}
 	i := strings.IndexAny(dest, ":/?#")
 	if i < 0 || dest[i] != ':' {
-		return true
+		return router
 	}
 	switch strings.ToLower(dest[:i]) {
 	case "http", "https", "mailto":

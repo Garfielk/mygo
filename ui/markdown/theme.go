@@ -187,13 +187,17 @@ func resolve(th *Theme, def *Theme) Theme {
 		if h.Weight == 0 {
 			h.Weight = d.Weight
 		}
-		c(&h.Color, d.Color)
+		if i == 5 {
+			c(&h.Color, out.Muted)
+		} else {
+			c(&h.Color, out.Text)
+		}
 		f(&h.Top, d.Top)
 		f(&h.Bottom, d.Bottom)
 	}
 	f(&out.ListIndent, def.ListIndent)
 	c(&out.QuoteBar, def.QuoteBar)
-	c(&out.QuoteText, def.QuoteText)
+	c(&out.QuoteText, out.Muted)
 	f(&out.QuoteBarWidth, def.QuoteBarWidth)
 	c(&out.Rule, def.Rule)
 	c(&out.CodeBlockBackground, def.CodeBlockBackground)

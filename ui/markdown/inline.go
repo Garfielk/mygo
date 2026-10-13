@@ -84,7 +84,7 @@ func (d *Document) Inlines(i int) []Inline {
 		at := int(d.segs[b.segA].start)
 		for _, o := range d.oldInl {
 			if o.at == at && o.text == text && !o.healed {
-				b.inl, b.labels = o.inl, o.labels
+				b.inl, b.labels, b.rev = o.inl, o.labels, o.rev
 				return b.inl
 			}
 		}
@@ -94,6 +94,8 @@ func (d *Document) Inlines(i int) []Inline {
 		d.healedAt = i
 	}
 	b.inl, b.labels = d.inp.parse(d, i, b.healed)
+	d.revs++
+	b.rev = d.revs
 	return b.inl
 }
 

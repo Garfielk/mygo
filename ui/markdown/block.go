@@ -252,7 +252,7 @@ func (d *Document) truncate(at, off int) map[string]linkRef {
 	for i := at; i < len(d.blocks); i++ {
 		b := &d.blocks[i]
 		if b.inlOK && b.segB > b.segA {
-			d.oldInl = append(d.oldInl, oldInline{int(d.segs[b.segA].start), b.text, b.inl, b.labels, b.healed})
+			d.oldInl = append(d.oldInl, oldInline{int(d.segs[b.segA].start), b.rev, b.text, b.inl, b.labels, b.healed})
 		}
 	}
 	root := &d.blocks[0]

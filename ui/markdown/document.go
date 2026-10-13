@@ -193,9 +193,9 @@ func (b *Block) Language() string {
 	return s
 }
 
-// Revision changes when the block's inline content does without its
-// source changing, as a link reference defined later in the document
-// resolves its links.
+// Revision changes when the block's inlines are parsed anew, as when a
+// link reference defined later in the document resolves its links: views
+// keep what they made of a block while it stays the same.
 func (b *Block) Revision() uint32 { return b.rev }
 
 // Document is Markdown parsed, which takes text appended to it, or edits,
@@ -229,11 +229,14 @@ type Document struct {
 	oldInl []oldInline
 	// healedAt is the block whose inlines were parsed healed, or -1.
 	healedAt int
+	// revs counts the inlines parsed, to give each a Revision of its own.
+	revs uint32
 	inp      inlineParser
 }
 
 type oldInline struct {
 	at     int // the offset of the block's content
+	rev    uint32
 	text   string
 	inl    []Inline
 	labels []string

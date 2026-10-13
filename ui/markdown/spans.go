@@ -18,12 +18,12 @@ type piece struct {
 	spans []ui.Span
 }
 
-// runMark notes that the rune at rune of a paragraph's text is source
-// byte src, and, when exact, that the span's text is the source's bytes
-// from there.
+// runMark notes that the text of a paragraph from rune comes from the
+// source's bytes [src, end): exact when it is those bytes, else written
+// otherwise there, as an entity or an escape.
 type runMark struct {
-	rune, src int
-	exact     bool
+	rune, src, end int
+	exact          bool
 }
 
 // para is what a paragraph, heading or cell shows.
@@ -91,13 +91,12 @@ func (sb *spanBuilder) piece(link int) *piece {
 	return sb.cur
 }
 
-// add adds text, which starts at source offset src (exact when the text
-// is the source's bytes there), in style s.
-func (sb *spanBuilder) add(text string, src int, exact bool, s spanStyle, link int) {
+// add adds text, which comes from the source's [src, end) (exact when it
+// is those bytes), in style s.
+func (sb *spanBuilder) add(text string, src, end int, exact bool, s spanStyle, link int) {
 	if text == "" {
 		return
 	}
-	th := sb.th
 	if sb.fade != nil && exact {
 		// Text revealed at different times fades in on its own: cut it
 		// where its opacity changes.
@@ -113,7 +112,7 @@ func (sb *spanBuilder) add(text string, src int, exact bool, s spanStyle, link i
 			for n < len(text) && !utf8.RuneStart(text[n]) {
 				n++
 			}
-			sb.addSpan(text[:n], src, exact, s, link, a)
+			sb.addSpan(text[:n], src, src+n, exact, s, link, a)
 			text, src = text[n:], src+n
 		}
 		return
@@ -122,11 +121,64 @@ func (sb *spanBuilder) add(text string, src int, exact bool, s spanStyle, link i
 	if sb.fade != nil {
 		a = sb.fade(src)
 	}
-	_ = th
-	sb.addSpan(text, src, exact, s, link, a)
+	sb.addSpan(text, src, end, exact, s, link, a)
 }
 
-func (sb *spanBuilder) addSpan(text string, src int, exact bool, s spanStyle, link int, alpha float32) {
+// addAligned adds text that comes from the source's [src, end) written
+// with escapes or entities: as many runs as are its bytes, and the rest,
+// each escape or entity, of its own, so that copying maps its runes to
+// the source's.
+func (sb *spanBuilder) addAligned(text string, src, end int, s spanStyle, link int) {
+	source := sb.d.src[src:end]
+	i, j := 0, 0 // in source and in text
+	run := 0     // where the run of the same bytes started, in text
+	flush := func() {
+		if j > run {
+			sb.add(text[run:j], src+i-(j-run), src+i, true, s, link)
+		}
+	}
+	for i < len(source) && j < len(text) {
+		switch {
+		case source[i] == '\\' && i+1 < len(source) && isEscapable(source[i+1]) && source[i+1] == text[j]:
+			flush()
+			sb.add(text[j:j+1], src+i, src+i+2, false, s, link)
+			i, j = i+2, j+1
+		case source[i] == '&' && entityAt(source, i, text[j:]) > 0:
+			n, lit := scanEntity(source, i)
+			flush()
+			sb.add(lit, src+i, src+i+n, false, s, link)
+			i, j = i+n, j+len(lit)
+		case source[i] == text[j]:
+			i++
+			j++
+			continue
+		default:
+			goto rest
+		}
+		run = j
+	}
+	flush()
+	run = j
+rest:
+	if j < len(text) {
+		if j > run {
+			flush()
+		}
+		sb.add(text[j:], src+i, end, false, s, link)
+	}
+}
+
+// entityAt returns the length of the entity at i of source that text
+// starts with, decoded, or 0.
+func entityAt(source string, i int, text string) int {
+	n, lit := scanEntity(source, i)
+	if n == 0 || !strings.HasPrefix(text, lit) {
+		return 0
+	}
+	return n
+}
+
+func (sb *spanBuilder) addSpan(text string, src, end int, exact bool, s spanStyle, link int, alpha float32) {
 	th := sb.th
 	sp := ui.Span{Text: text, Font: th.Font, Size: th.FontSize, Weight: s.weight, Italic: s.italic, Strikethrough: s.strike, Underline: s.underline}
 	if s.size != 0 {
@@ -173,7 +225,7 @@ func (sb *spanBuilder) addSpan(text string, src int, exact bool, s spanStyle, li
 	}
 	pc := sb.piece(link)
 	pc.spans = append(pc.spans, sp)
-	sb.p.marks = append(sb.p.marks, runMark{rune: sb.p.runes, src: src, exact: exact})
+	sb.p.marks = append(sb.p.marks, runMark{rune: sb.p.runes, src: src, end: end, exact: exact})
 	sb.p.runes += utf8.RuneCountInString(text)
 }
 
@@ -187,16 +239,25 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 		n := &in[k]
 		switch n.Kind {
 		case Text:
-			exact := n.End-n.Start == len(n.Text) && sb.d.src[n.Start:n.End] == n.Text
-			sb.add(n.Text, n.Start, exact, sb.htmlStyle(s), link)
+			if n.End-n.Start == len(n.Text) && sb.d.src[n.Start:n.End] == n.Text {
+				sb.add(n.Text, n.Start, n.End, true, sb.htmlStyle(s), link)
+			} else {
+				sb.addAligned(n.Text, n.Start, n.End, sb.htmlStyle(s), link)
+			}
 		case SoftBreak:
-			sb.add(" ", n.Start, false, s, link)
+			sb.add(" ", n.Start, n.End, false, s, link)
 		case LineBreak:
-			sb.add("\n", n.Start, false, s, link)
+			sb.add("\n", n.Start, n.End, false, s, link)
 		case Code:
 			cs := sb.htmlStyle(s)
 			cs.code = true
-			sb.add(n.Text, codeStart(sb.d.src, n), false, cs, link)
+			// The code's text is its source's bytes but for the spaces
+			// stripped at its ends and line endings as spaces.
+			a, z := codeStart(sb.d.src, n), n.End-(codeStart(sb.d.src, n)-n.Start)
+			if z-a == len(n.Text)+2 && sb.d.src[a] == ' ' {
+				a++
+			}
+			sb.add(n.Text, a, min(a+len(n.Text), z), z-a == len(n.Text), cs, link)
 		case Emphasis:
 			cs := s
 			cs.italic = true
@@ -233,10 +294,10 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 			if alt == "" {
 				alt = "image"
 			}
-			sb.add("["+alt+"]", n.Start, false, cs, link)
+			sb.add("["+alt+"]", n.Start, n.End, false, cs, link)
 		case HTML:
 			if !sb.inlineHTML(n.Text) {
-				sb.add(n.Text, n.Start, true, s, link)
+				sb.add(n.Text, n.Start, n.End, true, s, link)
 			}
 		case Math:
 			cs := s
@@ -245,7 +306,7 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 			if !cs.italic {
 				cs.size = sb.th.em(sb.th.CodeSize)
 			}
-			sb.add(n.Text, mathStart(sb.d.src, n), false, cs, link)
+			sb.add(n.Text, mathStart(sb.d.src, n), n.End, false, cs, link)
 		case FootnoteRef:
 			cs := s
 			cs.sub = true
@@ -258,7 +319,7 @@ func (sb *spanBuilder) inlines(from, to int, s spanStyle) {
 			if num > 0 {
 				label = itoa(num)
 			}
-			sb.add("["+label+"]", n.Start, false, cs, -2-k)
+			sb.add("["+label+"]", n.Start, n.End, false, cs, -2-k)
 		}
 	}
 }
@@ -305,7 +366,7 @@ func (sb *spanBuilder) inlineHTML(tag string) bool {
 	closing := strings.HasPrefix(tag, "</")
 	switch t {
 	case "br":
-		sb.add("\n", 0, false, sb.style, -1)
+		sb.add("\n", 0, 0, false, sb.style, -1)
 		return true
 	case "b", "strong", "i", "em", "u", "ins", "s", "del", "strike", "code", "kbd", "samp", "mark", "sub", "sup", "small":
 	default:
@@ -367,8 +428,10 @@ func imagesOnly(in []Inline) bool {
 	return n > 0
 }
 
-// sourceAt returns the source offset of rune r of the paragraph's text.
-func (p *para) sourceAt(src string, r int) int {
+// sourceAt returns the source offset of rune r of the paragraph's text:
+// for the end of a selection (end), that of the text before it, so that
+// what follows, as an emphasis's opening *, stays out.
+func (p *para) sourceAt(src string, r int, end bool) int {
 	if len(p.marks) == 0 {
 		return 0
 	}
@@ -381,18 +444,21 @@ func (p *para) sourceAt(src string, r int) int {
 			hi = m
 		}
 	}
-	m := p.marks[max(lo-1, 0)]
-	if !m.exact || r <= m.rune {
-		if r > m.rune && lo < len(p.marks) {
-			return p.marks[lo].src
+	k := max(lo-1, 0)
+	m := p.marks[k]
+	if r <= m.rune {
+		if end && k > 0 {
+			return p.marks[k-1].end
 		}
 		return m.src
 	}
-	// Count runes into the span's source text.
+	if !m.exact {
+		return m.end
+	}
 	off := m.src
-	for k := m.rune; k < r && off < len(src); k++ {
-		_, n := utf8.DecodeRuneInString(src[off:])
-		off += n
+	for n := m.rune; n < r && off < m.end; n++ {
+		_, w := utf8.DecodeRuneInString(src[off:])
+		off += w
 	}
 	return off
 }

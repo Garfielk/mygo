@@ -102,8 +102,9 @@ func (st *viewState) within(i, anc int) bool {
 	return false
 }
 
-// srcAt returns the source offset of rune r of an element's text.
-func (st *viewState) srcAt(inf elemInfo, r int) int {
+// srcAt returns the source offset of rune r of an element's text, for
+// the end of a selection when end.
+func (st *viewState) srcAt(inf elemInfo, r int, end bool) int {
 	d := st.doc
 	b := d.Block(inf.block)
 	switch b.Kind {
@@ -114,8 +115,11 @@ func (st *viewState) srcAt(inf elemInfo, r int) int {
 			line, at := d.Line(inf.block, k)
 			c := utf8.RuneCountInString(line)
 			if r <= c || k == n-1 {
+				// Spaces standing for a tab partly taken by indentation
+				// are not the source's.
+				pad := int(d.segs[int(b.segA)+k].pad)
 				off := at
-				for j := 0; j < r && off < at+len(line); j++ {
+				for j := pad; j < r && off < len(d.src); j++ {
 					_, w := utf8.DecodeRuneInString(d.src[off:])
 					off += w
 				}
@@ -126,7 +130,7 @@ func (st *viewState) srcAt(inf elemInfo, r int) int {
 		return b.Start
 	}
 	if inf.block < len(st.paras) && st.paras[inf.block].ok {
-		return st.paras[inf.block].p.sourceAt(d.src, r)
+		return st.paras[inf.block].p.sourceAt(d.src, r, end)
 	}
 	return b.Start
 }
@@ -144,20 +148,44 @@ func (st *viewState) copyMarkdown(parts []ui.SelectedText) string {
 	if !ok1 || !ok2 {
 		return st.copyText(parts)
 	}
-	a := st.srcAt(fi, first.Start)
-	if first.Start == 0 && fi.line <= 0 {
-		// From a block's start, its syntax too: a heading's #, a list's
-		// marker, a quote's >.
-		a = lineStartOf(d.src, d.Block(fi.block).Start)
+	fb, lb := d.Block(fi.block), d.Block(li.block)
+	a := st.srcAt(fi, first.Start, false)
+	b := st.srcAt(li, last.End, true)
+	atStart := first.Start == 0 && fi.line <= 0
+	atEnd := last.End >= utf8.RuneCountInString(last.Text)
+	if lb.Kind == CodeBlock && atEnd {
+		// Only the last chunk of lines ends the block.
+		atEnd = li.line+chunkLines >= d.LineCount(li.block)
 	}
-	b := st.srcAt(li, last.End)
-	if last.End >= utf8.RuneCountInString(last.Text) {
-		// To a block's end, the rest of its line too: a table row's last
-		// pipe, a heading's closing #.
-		b = lineEndOf(d.src, d.Block(li.block).End)
-		if p := d.Block(li.block); p.Kind == CodeBlock && p.Fenced && !p.Open {
-			b = p.End
+	// From a block's start, or to its end, its syntax too: a heading's #,
+	// a list's marker, a quote's >, a table row's pipes, a code block's
+	// fences when it is selected whole.
+	switch {
+	case !atStart:
+	case fb.Kind == TableCell:
+		// A row's pipes go with it when cells after it are selected too.
+		if fi.block == fb.Parent+1 && li.block != fi.block {
+			a = lineStartOf(d.src, fb.Start)
 		}
+	case fb.Kind == CodeBlock:
+		if fb.Fenced && atEnd && fi.block == li.block {
+			a = lineStartOf(d.src, fb.Start)
+		}
+	default:
+		a = lineStartOf(d.src, fb.Start)
+	}
+	switch {
+	case !atEnd:
+	case lb.Kind == TableCell:
+		if lb.Next == d.Block(lb.Parent).Next && li.block != fi.block {
+			b = lineEndOf(d.src, lb.End)
+		}
+	case lb.Kind == CodeBlock:
+		if lb.Fenced && !lb.Open && atStart && fi.block == li.block {
+			b = lb.End
+		}
+	default:
+		b = lineEndOf(d.src, lb.End)
 	}
 	if b < a {
 		a, b = b, a

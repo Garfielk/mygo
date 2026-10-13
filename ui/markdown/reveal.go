@@ -50,12 +50,15 @@ var DefaultReveal = Reveal{}
 // revealState is how much of the source a view shows, and since when
 // what it shows came in.
 type revealState struct {
-	src   string
-	shown int
-	carry float64
-	last  time.Time
-	marks []revealMark
-	fade  time.Duration
+	// revealing tells a stream being revealed, or done with text left to
+	// reveal.
+	revealing bool
+	src       string
+	shown     int
+	carry     float64
+	last      time.Time
+	marks     []revealMark
+	fade      time.Duration
 }
 
 // revealMark notes that the source from at on showed at time t.
@@ -71,17 +74,16 @@ func (rs *revealState) step(c *ui.Context, src string, streaming bool, r *Reveal
 		r = &DefaultReveal
 	}
 	now := c.Now()
-	if rs.shown > len(src) || !strings.HasPrefix(src, rs.src[:rs.shown]) {
-		// Not text added: an edit shows at once.
-		rs.shown, rs.last = len(src), time.Time{}
-	}
+	// Text a stream left to reveal still comes in once it is done; other
+	// text a finished view is given shows at once, as does an edit.
+	edited := rs.shown > len(src) || !strings.HasPrefix(src, rs.src[:rs.shown])
+	pending := rs.revealing && rs.shown < len(rs.src) && !edited
 	rs.src = src
-	if !streaming && rs.shown == 0 || r.Unit == AtOnce || rs.last.IsZero() && !streaming {
-		// A message shown finished from the start shows at once.
-		rs.shown = len(src)
-		rs.last = now
+	if !streaming && !pending || r.Unit == AtOnce || edited {
+		rs.shown, rs.last, rs.revealing = len(src), now, streaming
 		return rs.shown, false
 	}
+	rs.revealing = true
 	target := len(src)
 	if streaming && r.Unit != ByWord && r.Unit != ByCharacter {
 		// Only complete sentences, lines or paragraphs, while more is
@@ -96,8 +98,9 @@ func (rs *revealState) step(c *ui.Context, src string, streaming bool, r *Reveal
 		}
 	}
 	if rs.shown >= target {
+		// Nothing to show until more text comes, which builds a frame.
 		rs.last = now
-		return rs.shown, rs.shown < len(src)
+		return rs.shown, false
 	}
 	dt := now.Sub(rs.last)
 	if rs.last.IsZero() || dt > 100*time.Millisecond {

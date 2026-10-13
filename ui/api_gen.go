@@ -382,6 +382,18 @@ func (_handle *Context) Root() Element {
 	return wrapElement(_ctx.Root())
 }
 
+// isPath reports whether a link's target is a path within the app, as
+// "/notes/42", "edit" or "?tab=info", rather than a URL with a scheme.
+// Router returns the router whose page is being built, which a Link to a
+// path without a scheme goes through, or nil outside one.
+func (_handle *Context) Router() *Router {
+	_ctx := _handle.build()
+	if _ctx == nil {
+		return nil
+	}
+	return _ctx.Router()
+}
+
 // SetTheme makes the frame use t, for the window's root and the widgets
 // created after the call.
 func (_handle *Context) SetTheme(t *Theme) {
