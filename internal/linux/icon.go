@@ -65,7 +65,9 @@ func (shell) FileIcon(path string, size int) ([]byte, error) {
 	if icon == 0 {
 		return nil, fmt.Errorf("mygo: no icon for %q", path)
 	}
-	const flags = 1<<3 | 1<<4 // GTK_ICON_LOOKUP_GENERIC_FALLBACK, GTK_ICON_LOOKUP_FORCE_SIZE
+	// GIO's themed icons list their generic names themselves, and GTK takes
+	// GTK_ICON_LOOKUP_GENERIC_FALLBACK only with names of its own.
+	const flags = 1 << 4 // GTK_ICON_LOOKUP_FORCE_SIZE
 	info := gtkIconThemeLookupByGicon(gtkIconThemeGetDefault(), icon, int32(size), flags)
 	if info == 0 {
 		return nil, fmt.Errorf("mygo: the icon theme has no icon for %q", path)
