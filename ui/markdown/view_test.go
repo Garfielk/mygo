@@ -188,3 +188,17 @@ func TestSlug(t *testing.T) {
 		}
 	}
 }
+
+// TestFadeOrder checks that text revealed later is more transparent.
+func TestFadeOrder(t *testing.T) {
+	now := time.Now()
+	rs := revealState{marks: []revealMark{{0, now.Add(-250 * time.Millisecond)}, {5, now.Add(-150 * time.Millisecond)}, {8, now.Add(-20 * time.Millisecond)}}}
+	f := rs.fadeAt(now, false, nil)
+	a, b, c := f(1), f(6), f(9)
+	if !(a > b && b > c) {
+		t.Errorf("opacities %v %v %v, want decreasing", a, b, c)
+	}
+	if f(100) != c {
+		t.Errorf("text after the last mark: %v", f(100))
+	}
+}

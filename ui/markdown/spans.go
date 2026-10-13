@@ -157,16 +157,16 @@ func (sb *spanBuilder) addSpan(text string, src int, exact bool, s spanStyle, li
 		sp.Color = s.color
 	}
 	if alpha < 1 {
+		// Not quite transparent: a color of alpha 0 is none, the text's.
+		alpha = max(alpha, 0.02)
 		if sp.Color.A == 0 {
 			sp.Color = th.Text
 			if s.inLink {
 				sp.Color = th.Link
 			}
 		}
-		sp.Color = sp.Color.Alpha(alpha * float32(sp.Color.A) / 255)
-		if sp.Background.A > 0 {
-			sp.Background = sp.Background.Alpha(alpha * float32(sp.Background.A) / 255)
-		}
+		sp.Color = sp.Color.Alpha(alpha)
+		sp.Background = sp.Background.Alpha(alpha)
 	}
 	if sb.fade != nil {
 		sb.p.fading = sb.p.fading || alpha < 1

@@ -153,6 +153,10 @@ func snap(src string, i, target int, u RevealUnit) int {
 // fader returns the opacity of text at a source offset as it fades in,
 // or nil when nothing fades.
 func (rs *revealState) fader(c *ui.Context, r *Reveal) func(src int) float32 {
+	return rs.fadeAt(c.Now(), c.Preferences().ReduceMotion, r)
+}
+
+func (rs *revealState) fadeAt(now time.Time, reduceMotion bool, r *Reveal) func(src int) float32 {
 	if r == nil {
 		r = &DefaultReveal
 	}
@@ -160,14 +164,13 @@ func (rs *revealState) fader(c *ui.Context, r *Reveal) func(src int) float32 {
 	if fade == 0 {
 		fade = 300 * time.Millisecond
 	}
-	now := c.Now()
 	// Marks done fading are gone.
 	k := 0
 	for k < len(rs.marks) && (fade < 0 || now.Sub(rs.marks[k].t) >= fade) {
 		k++
 	}
 	rs.marks = append(rs.marks[:0], rs.marks[k:]...)
-	if len(rs.marks) == 0 || fade < 0 || c.Preferences().ReduceMotion {
+	if len(rs.marks) == 0 || fade < 0 || reduceMotion {
 		rs.marks = rs.marks[:0]
 		return nil
 	}
