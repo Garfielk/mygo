@@ -4,16 +4,19 @@ package darwin
 
 import (
 	"fmt"
-	"os"
+	"path/filepath"
 )
 
 // FileIcon returns the icon Finder shows for a file, a folder or an
 // application (NSWorkspace iconForFile:), drawn at size by size pixels
-// from the representation that fits it best.
+// from the representation that fits it best. A symbolic link gets the
+// icon of what it points to, without the arrow Finder adds to links.
 func (shell) FileIcon(path string, size int) ([]byte, error) {
-	if _, err := os.Stat(path); err != nil {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
 		return nil, err
 	}
+	path = real
 	var png []byte
 	withPool(func() {
 		if img := send(workspace(), "iconForFile:", uintptr(nsString(path))); img != 0 {

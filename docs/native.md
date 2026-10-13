@@ -154,7 +154,8 @@ png, err := mygo.Shell.FileIcon("/Applications/Safari.app", 64)
 ```
 
 On macOS it is Finder's icon (`NSWorkspace`), drawn from the
-representation that fits the size best. On Windows it is Explorer's
+representation that fits the size best; a symbolic link has the icon of
+what it points to, without Finder's arrow. On Windows it is Explorer's
 (`IShellItemImageFactory`, icons only, no thumbnails), and the path may
 also name a shell item, such as an app of the Start menu by
 `shell:AppsFolder\<AppUserModelID>`. On Linux it is the icon of the file's
