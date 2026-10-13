@@ -239,7 +239,24 @@ func welcome() richtext.Text {
 		richtext.Paragraph{Style: richtext.ParagraphStyle{List: richtext.Tasks, Checked: true}, Runs: []richtext.Run{{Text: "Open this note"}}},
 		richtext.Paragraph{Style: richtext.ParagraphStyle{List: richtext.Tasks}, Runs: []richtext.Run{{Text: "Type "}, {Text: "- ", Attributes: code}, {Text: " to start a list, "}, {Text: "# ", Attributes: code}, {Text: " for a heading"}}},
 		richtext.Paragraph{Style: richtext.ParagraphStyle{List: richtext.Tasks}, Runs: []richtext.Run{{Text: "Copy the note as Markdown"}}},
+		richtext.Paragraph{Runs: []richtext.Run{{Text: "Attachments sit in the line, as "},
+			{Text: string(richtext.ObjectReplacement), Attributes: richtext.Attributes{Attachment: fileChip("itinerary.pdf")}},
+			{Text: " does."}}},
 	)
+}
+
+// fileChip returns an attachment drawn as a chip with a file's name.
+func fileChip(name string) *richtext.Attachment {
+	font := ui.Font{Size: 12}
+	w, _ := ui.ShapeText(name, font, 0).Size()
+	return &richtext.Attachment{Name: name, Width: w + 28, Height: 20, Draw: func(p *ui.Painter, r ui.Rect) {
+		t := p.Theme()
+		p.Fill(r, t.Accent.Alpha(0.12), r.H/2)
+		p.Fill(ui.Rect{X: r.X + 8, Y: r.Y + 6, W: 7, H: 8}, t.Accent, 1.5)
+		l := ui.ShapeText(name, font, 0)
+		_, lh := l.Size()
+		p.TextLayout(l, r.X+20, r.Y+(r.H-lh)/2, t.Accent)
+	}}
 }
 
 func main() {

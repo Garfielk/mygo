@@ -225,6 +225,10 @@ func (v *view) key(key ui.Key, mods ui.Modifiers) bool {
 	}
 	word := (!mac && m == ui.Ctrl) || (mac && m == ui.Alt)
 	readOnly := v.opts.ReadOnly
+	if key == ui.KeyV && shift && (m == ui.Cmd || m == ui.Cmd|ui.Alt) {
+		// Paste and Match Style: ⇧⌥⌘V, and ⇧⌘V as Notes has it.
+		return v.editCommand("pasteAndMatchStyle")
+	}
 	a, z := v.selection()
 	n := v.shown.Len()
 	switch key {
@@ -313,9 +317,6 @@ func (v *view) key(key ui.Key, mods ui.Modifiers) bool {
 		case ui.KeyX:
 			return v.editCommand("cut")
 		case ui.KeyV:
-			if shift && mac || shift && mods&ui.Alt != 0 {
-				return v.editCommand("pasteAndMatchStyle")
-			}
 			return v.editCommand("paste")
 		case ui.KeyZ:
 			if shift {

@@ -150,18 +150,19 @@ const (
 type ParagraphStyle struct {
 	// Heading is the level of a heading, from 1, or 0 for a body
 	// paragraph.
-	Heading int
-	List    ListKind
+	Heading int      `json:"heading,omitempty"`
+	List    ListKind `json:"list,omitempty"`
 	// Checked marks a task done.
-	Checked bool
+	Checked bool `json:"checked,omitempty"`
 	// Indent is how many levels the paragraph is indented: the level of a
 	// list's item, from 0.
-	Indent int
+	Indent int `json:"indent,omitempty"`
 	// Align aligns its lines: Start (the default), Center or End.
-	Align ui.Align
+	Align ui.Align `json:"align,omitempty"`
 	// Quote and CodeBlock show the paragraph as a quotation, or as code in
 	// the monospaced font, its spaces kept.
-	Quote, CodeBlock bool
+	Quote     bool `json:"quote,omitempty"`
+	CodeBlock bool `json:"codeBlock,omitempty"`
 }
 
 // Run is a run of text with its attributes.
