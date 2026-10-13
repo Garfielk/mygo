@@ -44,6 +44,8 @@ func testDocs(t *testing.T, opts DocumentsOptions[string]) *Documents[string] {
 			}
 		}
 		docWork.Wait()
+		// Windows deletes no file a process holds open: the session's lock.
+		ds.kind.recovery.close()
 		onMain(func() { fb.OnMessageBox, fb.OnSaveDialog, fb.OnOpenDialog = nil, nil, nil })
 	})
 	return ds

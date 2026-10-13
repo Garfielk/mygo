@@ -144,6 +144,8 @@ func (s *recoveryStore) close() {
 	if len(s.entries) == 0 {
 		os.RemoveAll(s.dir)
 	}
+	s.dir = ""
+	clear(s.entries)
 }
 
 // orphan is a copy that no running instance holds.
