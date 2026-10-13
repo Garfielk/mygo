@@ -121,7 +121,15 @@ func TestLinearTime(t *testing.T) {
 		"backticks":          "`a``",
 		"escapes":            `\*`,
 	} {
-		small, large := timeOf(strings.Repeat(unit, 5000)), timeOf(strings.Repeat(unit, 20000))
+		// A quadratic input is slow at every try; a busy machine (CI runs
+		// packages in parallel) is not.
+		var small, large time.Duration
+		for range 3 {
+			small, large = timeOf(strings.Repeat(unit, 5000)), timeOf(strings.Repeat(unit, 20000))
+			if large <= 10*small || large <= 20*time.Millisecond {
+				break
+			}
+		}
 		if large > 10*small && large > 20*time.Millisecond {
 			t.Errorf("%s: %v for 5000, %v for 20000", name, small, large)
 		}
