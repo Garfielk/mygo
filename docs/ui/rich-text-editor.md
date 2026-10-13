@@ -89,7 +89,7 @@ level, and items next to each other make a list, numbered at each level from
 1 (in letters and Roman numerals below the first).
 
 `MarshalJSON` and `UnmarshalJSON` save a text. `Markdown` and `HTML` export
-it, and `ParseHTML` reads HTML, as a paste does.
+it, and `ParseHTML` and `ParseRTF` read HTML and RTF, as a paste does.
 
 ## Documents
 
@@ -238,10 +238,15 @@ Copying puts the selection on the clipboard in three formats:
 - HTML;
 - plain text.
 
-Pasting reads the richest of those formats that the clipboard holds. HTML
-from browsers, mail, Word and Google Docs keeps its headings, lists, task
-lists, quotations, blocks of code, alignment, bold, italic, underline,
-strikethrough, code and links. Fonts, sizes and colors are left out, as
+Pasting reads the richest format the clipboard holds: the editor's own,
+then HTML, then RTF, then plain text.
+
+- HTML, as browsers, mail, Word and Google Docs copy it, keeps its
+  headings, lists, task lists, quotations, blocks of code, alignment,
+  bold, italic, underline, strikethrough, code and links.
+- RTF, as TextEdit, Pages and WordPad copy it without HTML, keeps its
+  paragraphs, alignment, lists, bold, italic, underline, strikethrough and
+  links. Fonts, sizes and colors are left out, as
 Notes leaves them, so that what is pasted takes the editor's. Paste and
 Match Style (⇧⌥⌘V) pastes plain text in the typing attributes.
 

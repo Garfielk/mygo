@@ -149,3 +149,31 @@ func TestJSON(t *testing.T) {
 		t.Fatalf("%q, want %q", runsOf(out), runsOf(in))
 	}
 }
+
+func TestParseRTF(t *testing.T) {
+	// As TextEdit copies: a font table, bold, italic, a link, a list.
+	rtf := `{\rtf1\ansi\ansicpg1252\cocoartf2822
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+\pard\tx560\pardirnatural\partightenfactor0
+\f0\fs24 \cf0 Plain \b bold\b0  and \i italic\i0 , caf\'e9 \u8364 ? {\field{\*\fldinst{HYPERLINK "https://go.dev"}}{\fldrslt site}} end.\
+\pard\qc centered\
+\pard\tx220\li720\fi-720\pardirnatural\partightenfactor0
+\ls1\ilvl0{\listtext	\uc0舦 	}one\
+{\listtext	\uc0舦 	}two\
+}`
+	got := ParseRTF([]byte(rtf))
+	if s := got.String(); s != "Plain bold and italic, café € site end.\ncentered\none\ntwo" {
+		t.Fatalf("text %q", s)
+	}
+	first, _ := got.ParagraphRange(0)
+	if r := runsOf(got.Slice(first, 39)); r != "Plain |*bold*| and |_italic_|, café € |[site]| end." {
+		t.Fatalf("runs %q", r)
+	}
+	if st := got.ParagraphStyleAt(45); st.Align != ui.Center {
+		t.Fatalf("centered: %+v", st)
+	}
+	if st := got.ParagraphStyleAt(got.Len()); st.List != Bullets {
+		t.Fatalf("list: %+v", st)
+	}
+}

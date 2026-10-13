@@ -82,4 +82,16 @@ func TestRichTextEditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "the paste undone", func() bool { return runs() == "Hello |*世界*|" })
+	// RTF alone, as TextEdit copies it, pastes with its formats too.
+	err = mygo.Clipboard.Write(transfer.New(transfer.NewItem(
+		transfer.Bytes(richtext.RTF, []byte(`{\rtf1\ansi{\fonttbl\f0 Helvetica;}\f0 \b rtf\b0 }`)),
+		transfer.Bytes(transfer.Text, []byte("rtf")),
+	)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := activateMenu(w, "Edit", "Paste"); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the RTF pasted", func() bool { return runs() == "Hello |*世界rtf*|" })
 }

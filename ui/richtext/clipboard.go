@@ -201,13 +201,19 @@ func (v *view) paste(matchStyle bool) {
 	var t Text
 	ok := false
 	if !matchStyle {
-		d := v.services.ReadClipboardData(Format, transfer.HTML, transfer.Text)
+		d := v.services.ReadClipboardData(Format, transfer.HTML, RTF, transfer.Text)
 		if b, err := d.Read(Format); err == nil {
 			t, ok = decodeClip(b)
 		}
 		if !ok {
 			if b, err := d.Read(transfer.HTML); err == nil && len(b) > 0 {
 				t, ok = ParseHTML(string(b)), true
+			}
+		}
+		if !ok {
+			// TextEdit, Pages and WordPad copy RTF without HTML.
+			if b, err := d.Read(RTF); err == nil && len(b) > 0 {
+				t, ok = ParseRTF(b), true
 			}
 		}
 		if !ok {

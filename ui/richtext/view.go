@@ -762,6 +762,7 @@ func (v *view) selection() (int, int) { return min(v.selAnchor, v.caret), max(v.
 func (v *view) access(n *platform.AccessNode) {
 	n.Value = v.shown.String()
 	n.SelStart, n.SelEnd = v.selection()
+	n.States |= platform.AccessMultiline
 	if v.opts.ReadOnly {
 		n.States |= platform.AccessReadOnly
 	}
