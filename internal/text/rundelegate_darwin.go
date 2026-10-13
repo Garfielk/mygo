@@ -18,7 +18,7 @@ func runDelegateFuncs() (dealloc, ascent, descent, width uintptr)
 
 // runDelegateCallbacks is a CTRunDelegateCallbacks, version 1.
 type runDelegateCallbacks struct {
-	version                           int
+	version                         int
 	dealloc, ascent, descent, width uintptr
 }
 
