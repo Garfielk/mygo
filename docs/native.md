@@ -186,7 +186,7 @@ Each app has the `Name` the system shows, in the user's language, an
 
 | | the apps | `ID` | `Path` |
 |---|---|---|---|
-| macOS | the `.app` bundles of `/Applications`, `/System/Applications`, `~/Applications` and CoreServices' `Applications`, and of their folders (Utilities), plus Finder; symbolic links give the apps they point to | the bundle identifier, or the path for a bundle without one | the bundle |
+| macOS | the `.app` bundles of `/Applications`, `/System/Applications`, `~/Applications` and CoreServices' `Applications`, and of their folders (Utilities), plus Finder; an app behind symbolic links once, at the link, as `/Applications/Safari.app` | the bundle identifier, or the path for a bundle without one | the bundle |
 | Windows | the Start menu's All apps, desktop and packaged apps alike (the shell's Applications folder) | the AppUserModelID, or for a desktop app without one, its path under a known folder | `shell:AppsFolder\<ID>` |
 | Linux | the desktop entries menus show (not `NoDisplay`, `Hidden`, or meant for another desktop) | the desktop file ID, such as `org.gnome.Nautilus.desktop` | the desktop entry |
 

@@ -26,19 +26,21 @@ func appDirs() []string {
 
 // Applications finds the .app bundles in the folders apps are installed in
 // and those one level down (Utilities, an app's folder), without looking
-// inside bundles, and Finder (which is in CoreServices). Symbolic links,
-// as /Applications/Safari.app, give the app they point to. Each has the
+// inside bundles, and Finder (which is in CoreServices), each once: an app
+// a symbolic link points to, as /Applications/Safari.app does, is listed
+// at the link, which FileIcon draws without the badge of links. Each has the
 // name Finder shows (localized, without .app) and its bundle identifier,
 // or its path without one.
 func (b *Backend) Applications() ([]platform.Application, error) {
 	var paths []string
 	seen := map[string]bool{}
 	add := func(p string) {
-		if real, err := filepath.EvalSymlinks(p); err == nil {
-			p = real
+		real := p
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			real = r
 		}
-		if !seen[p] {
-			seen[p] = true
+		if !seen[real] {
+			seen[real] = true
 			paths = append(paths, p)
 		}
 	}
