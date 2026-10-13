@@ -202,3 +202,39 @@ func TestFadeOrder(t *testing.T) {
 		t.Errorf("text after the last mark: %v", f(100))
 	}
 }
+
+// TestFadeReplayed streams anew, a paragraph at a time, text the view
+// showed whole, and checks that the text fades in all the same.
+func TestFadeReplayed(t *testing.T) {
+	const src = "First paragraph here.\n\n1. An item\n2. Another\n\nLast one.\n"
+	text, done := src, true
+	o := &Options{Reveal: &Reveal{Unit: ByParagraph}}
+	var st *viewState
+	tt := ui.NewTester(func(c *ui.Context) {
+		var root ui.Element
+		if done {
+			root = View(c, text, o)
+		} else {
+			root = Stream(c, text, o)
+		}
+		st = *ui.Local(root, stateKey{}, newState)
+	}, 600, 400)
+	text, done = "", false
+	tt.Frame()
+	text = src
+	faded := false
+	for range 20 {
+		time.Sleep(10 * time.Millisecond)
+		tt.Frame()
+		for i := range st.paras {
+			for _, pc := range st.paras[i].p.pieces {
+				for _, s := range pc.spans {
+					faded = faded || s.Color.A > 0 && s.Color.A < 200
+				}
+			}
+		}
+	}
+	if !faded {
+		t.Error("text streamed again did not fade in")
+	}
+}

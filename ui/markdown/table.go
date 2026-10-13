@@ -74,6 +74,11 @@ func (st *viewState) table(c *ui.Context, i int, base spanStyle) ui.Element {
 				if n > 0 {
 					rowEl.BorderWidth(1, 0, 0, 0).BorderColor(th.TableBorder)
 				}
+				if st.fade != nil && b.Open {
+					if a := st.fade(row.Start); a < 1 {
+						rowEl.Opacity(a)
+					}
+				}
 				header := row.Header
 				rowEl.Children(func() {
 					k := 0

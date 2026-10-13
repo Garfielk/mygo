@@ -149,6 +149,11 @@ func build(c *ui.Context, src string, o *Options, streaming bool) ui.Element {
 
 	shown, revealing := st.reveal.step(c, src, streaming, o.Reveal)
 	st.doc.SetStreaming(streaming || revealing)
+	if !strings.HasPrefix(src[:shown], st.doc.Source()) {
+		// Another text, not more of it: blocks where blocks were may
+		// show other text.
+		st.forget()
+	}
 	st.doc.Set(src[:shown])
 	st.fade = st.reveal.fader(c, o.Reveal)
 
@@ -201,6 +206,13 @@ func (st *viewState) theme(c *ui.Context) {
 	st.sb.d, st.sb.th = st.doc, &st.th
 }
 
+// forget drops what the view made of its blocks.
+func (st *viewState) forget() {
+	clear(st.paras)
+	clear(st.codes)
+	clear(st.tables)
+}
+
 func (st *viewState) note(id uint64, block, line int) {
 	st.elems = append(st.elems, elemInfo{id, block, line})
 }
@@ -231,6 +243,7 @@ func (st *viewState) blocks(c *ui.Context, parent int, tight bool, base spanStyl
 			}
 		}
 		el := st.block(c, j, tight, base)
+		st.fadeIn(el, b)
 		if top > 0 {
 			el.Margin(top, 0, 0, 0)
 		}
@@ -322,6 +335,22 @@ func (st *viewState) defaultBlock(c *ui.Context, i int, tight bool, base spanSty
 	return ui.Box(c)
 }
 
+// fadeIn fades in a block revealed a moment ago: text fades by its
+// spans, and the rest of blocks, as a code block's box or a table's
+// lines, by their opacity.
+func (st *viewState) fadeIn(el ui.Element, b *Block) {
+	if st.fade == nil {
+		return
+	}
+	switch b.Kind {
+	case Paragraph, Heading, List:
+		return
+	}
+	if a := st.fade(b.Start); a < 1 {
+		el.Opacity(a)
+	}
+}
+
 // para returns the paragraph of block i in style base, built anew only
 // when it changed.
 func (st *viewState) para(i int, base spanStyle) *para {
@@ -330,7 +359,8 @@ func (st *viewState) para(i int, base spanStyle) *para {
 	}
 	b := st.doc.Block(i)
 	pc := &st.paras[i]
-	if pc.ok && pc.start == b.Start && pc.end == b.End && pc.kind == b.Kind && pc.rev == b.rev && pc.base == base && !pc.p.fading && !b.healed {
+	fading := st.fade != nil && st.fade(max(b.End-1, b.Start)) < 1
+	if pc.ok && pc.start == b.Start && pc.end == b.End && pc.kind == b.Kind && pc.rev == b.rev && pc.base == base && !pc.p.fading && !fading && !b.healed {
 		return &pc.p
 	}
 	pc.start, pc.end, pc.kind, pc.rev, pc.base, pc.ok = b.Start, b.End, b.Kind, b.rev, base, true
@@ -514,6 +544,11 @@ func (st *viewState) countChildren(i int) int {
 func (st *viewState) marker(c *ui.Context, list, item *Block, n, depth int, width float32) {
 	th := &st.th
 	box := ui.Row(c).Width(width).Shrink(0).Unselectable()
+	if st.fade != nil {
+		if a := st.fade(item.Start); a < 1 {
+			box.Opacity(a)
+		}
+	}
 	box.Children(func() {
 		switch {
 		case item.Task != NoTask:
