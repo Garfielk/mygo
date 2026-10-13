@@ -290,7 +290,7 @@ func ParseHTML(s string) Text {
 	if err != nil {
 		return NewText(s)
 	}
-	var b htmlBuilder
+	b := htmlBuilder{space: true}
 	b.node(root, Attributes{})
 	b.flush()
 	if len(b.paras) == 0 {
@@ -318,7 +318,7 @@ func (b *htmlBuilder) flush() {
 		}
 	}
 	b.paras = append(b.paras, p)
-	b.cur, b.started, b.space = Paragraph{}, false, false
+	b.cur, b.started, b.space = Paragraph{}, false, true
 }
 
 // begin starts a paragraph of style, unless one is being built.
@@ -326,7 +326,6 @@ func (b *htmlBuilder) begin() {
 	if !b.started {
 		b.cur = Paragraph{Style: b.style}
 		b.started = true
-		b.space = true
 	}
 }
 
