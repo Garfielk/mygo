@@ -286,6 +286,7 @@ type node struct {
 	textClient TextInputClient
 	caret      Rect
 	takesText  bool
+	copyText   func(parts []SelectedText) string
 
 	// Content.
 	text     string

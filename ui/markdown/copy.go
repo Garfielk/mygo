@@ -1,0 +1,242 @@
+package markdown
+
+import (
+	"slices"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/egoist/mygo/ui"
+)
+
+// Copying: as text, a view joins its paragraphs with blank lines, a code
+// block's lines and a tight list's items with newlines and a table's
+// cells with tabs; as Markdown, it copies the source between the
+// selection's ends, with the syntax of emphasis, code and links cut by
+// them completed.
+
+func (st *viewState) elem(id uint64) (elemInfo, bool) {
+	for _, e := range st.elems {
+		if e.id == id {
+			return e, true
+		}
+	}
+	return elemInfo{}, false
+}
+
+// copyText returns the text of the selected parts.
+func (st *viewState) copyText(parts []ui.SelectedText) string {
+	var b strings.Builder
+	var prev elemInfo
+	for k, p := range parts {
+		inf, ok := st.elem(p.ID)
+		if k > 0 {
+			if ok {
+				b.WriteString(st.separator(prev, inf))
+			} else {
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString(runeSlice(p.Text, p.Start, p.End))
+		prev = inf
+	}
+	return b.String()
+}
+
+func runeSlice(s string, from, to int) string {
+	i, n := 0, 0
+	a, z := len(s), len(s)
+	for i < len(s) {
+		if n == from {
+			a = i
+		}
+		if n == to {
+			z = i
+			break
+		}
+		_, w := utf8.DecodeRuneInString(s[i:])
+		i += w
+		n++
+	}
+	if from >= n && a == len(s) {
+		a = len(s)
+	}
+	return s[a:max(a, z)]
+}
+
+// separator returns what goes between the text of two blocks copied.
+func (st *viewState) separator(a, b elemInfo) string {
+	d := st.doc
+	if a.block == b.block {
+		return "\n"
+	}
+	ab, bb := d.Block(a.block), d.Block(b.block)
+	if ab.Kind == TableCell && bb.Kind == TableCell {
+		if ab.Parent == bb.Parent {
+			return "\t"
+		}
+		return "\n"
+	}
+	// Items of the same tight list.
+	if l := st.listOf(b.block); l > 0 && d.Block(l).Tight && st.listOf(a.block) == l || st.listOf(a.block) > 0 && d.Block(st.listOf(a.block)).Tight && st.within(b.block, st.listOf(a.block)) {
+		return "\n"
+	}
+	return "\n\n"
+}
+
+// listOf returns the nearest list around block i, or 0.
+func (st *viewState) listOf(i int) int {
+	for p := st.doc.Block(i).Parent; p > 0; p = st.doc.Block(p).Parent {
+		if st.doc.Block(p).Kind == List {
+			return p
+		}
+	}
+	return 0
+}
+
+func (st *viewState) within(i, anc int) bool {
+	for p := st.doc.Block(i).Parent; p >= 0; p = st.doc.Block(p).Parent {
+		if p == anc {
+			return true
+		}
+	}
+	return false
+}
+
+// srcAt returns the source offset of rune r of an element's text.
+func (st *viewState) srcAt(inf elemInfo, r int) int {
+	d := st.doc
+	b := d.Block(inf.block)
+	switch b.Kind {
+	case CodeBlock, HTMLBlock, MathBlock:
+		// Lines from inf.line on, each followed by a newline.
+		n := d.LineCount(inf.block)
+		for k := max(inf.line, 0); k < n; k++ {
+			line, at := d.Line(inf.block, k)
+			c := utf8.RuneCountInString(line)
+			if r <= c || k == n-1 {
+				off := at
+				for j := 0; j < r && off < at+len(line); j++ {
+					_, w := utf8.DecodeRuneInString(d.src[off:])
+					off += w
+				}
+				return off
+			}
+			r -= c + 1
+		}
+		return b.Start
+	}
+	if inf.block < len(st.paras) && st.paras[inf.block].ok {
+		return st.paras[inf.block].p.sourceAt(d.src, r)
+	}
+	return b.Start
+}
+
+// copyMarkdown returns the Markdown of the selected parts, or of the
+// whole document when none is selected.
+func (st *viewState) copyMarkdown(parts []ui.SelectedText) string {
+	d := st.doc
+	if len(parts) == 0 {
+		return d.Source()
+	}
+	first, last := parts[0], parts[len(parts)-1]
+	fi, ok1 := st.elem(first.ID)
+	li, ok2 := st.elem(last.ID)
+	if !ok1 || !ok2 {
+		return st.copyText(parts)
+	}
+	a := st.srcAt(fi, first.Start)
+	if first.Start == 0 && fi.line <= 0 {
+		// From a block's start, its syntax too: a heading's #, a list's
+		// marker, a quote's >.
+		a = lineStartOf(d.src, d.Block(fi.block).Start)
+	}
+	b := st.srcAt(li, last.End)
+	if last.End >= utf8.RuneCountInString(last.Text) {
+		// To a block's end, the rest of its line too: a table row's last
+		// pipe, a heading's closing #.
+		b = lineEndOf(d.src, d.Block(li.block).End)
+		if p := d.Block(li.block); p.Kind == CodeBlock && p.Fenced && !p.Open {
+			b = p.End
+		}
+	}
+	if b < a {
+		a, b = b, a
+	}
+	prefix := st.openAt(fi.block, a)
+	suffix := st.closeAt(li.block, b)
+	return prefix + d.src[a:b] + suffix
+}
+
+func lineEndOf(src string, off int) int {
+	for off < len(src) && src[off] != '\n' && src[off] != '\r' {
+		off++
+	}
+	return off
+}
+
+// openAt returns the opening syntax of the inline spans of block i that
+// offset at falls inside, outermost first.
+func (st *viewState) openAt(i, at int) string {
+	in := st.doc.Inlines(i)
+	var b strings.Builder
+	for k := range in {
+		n := &in[k]
+		if n.Start < at && at < n.End {
+			if open := st.openSyntax(in, k); open != "" {
+				b.WriteString(open)
+			}
+		}
+	}
+	return b.String()
+}
+
+// closeAt returns the closing syntax of the inline spans of block i that
+// offset at falls inside, innermost first.
+func (st *viewState) closeAt(i, at int) string {
+	in := st.doc.Inlines(i)
+	var closes []string
+	for k := range in {
+		n := &in[k]
+		if n.Start < at && at < n.End {
+			if c := st.closeSyntax(in, k); c != "" {
+				closes = append(closes, c)
+			}
+		}
+	}
+	slices.Reverse(closes)
+	return strings.Join(closes, "")
+}
+
+func (st *viewState) openSyntax(in []Inline, k int) string {
+	n := &in[k]
+	src := st.doc.src
+	switch n.Kind {
+	case Emphasis, Strong, Strikethrough, Link:
+		if k+1 < n.Next {
+			return src[n.Start:in[k+1].Start]
+		}
+	case Code:
+		return src[n.Start:codeStart(src, n)]
+	}
+	return ""
+}
+
+func (st *viewState) closeSyntax(in []Inline, k int) string {
+	n := &in[k]
+	src := st.doc.src
+	switch n.Kind {
+	case Emphasis, Strong, Strikethrough, Link:
+		if k+1 < n.Next {
+			// The end of its last child.
+			end := in[k+1].End
+			for j := k + 1; j < n.Next; j = in[j].Next {
+				end = in[j].End
+			}
+			return src[end:n.End]
+		}
+	case Code:
+		ticks := codeStart(src, n) - n.Start
+		return src[n.End-ticks : n.End]
+	}
+	return ""
+}

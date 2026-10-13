@@ -252,6 +252,34 @@ func (e *node) Selectable() *node {
 	return e
 }
 
+// SelectedText is the part of a paragraph that the selection of a
+// Selectable container holds.
+type SelectedText struct {
+	// ID is the paragraph's element's (Element.ID).
+	ID uint64
+	// Text is the paragraph's text, and Start and End the runes of it the
+	// selection holds.
+	Text       string
+	Start, End int
+}
+
+// SelectedTexts returns the parts of the paragraphs that the selection of
+// a Selectable container holds, in the order they were built, or none,
+// as of the last frame: to copy them otherwise, as a context menu's item
+// does.
+func (e *node) SelectedTexts() []SelectedText {
+	return e.c.rt.selectedTexts(e.id)
+}
+
+// CopyText sets what Copy, its shortcut and the context menu's put on
+// the clipboard for the selection of a Selectable container: fn gets its
+// parts, as SelectedTexts returns them, and returns the text, as a
+// document copies its paragraphs with blank lines between them.
+func (e *node) CopyText(fn func(parts []SelectedText) string) *node {
+	e.copyText = fn
+	return e
+}
+
 // Unselectable excludes a paragraph or container subtree from a surrounding
 // Selectable container. A Selectable container nested inside it can provide
 // a selection of its own. For inline elements, set it on their paragraph.

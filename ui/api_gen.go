@@ -2773,6 +2773,20 @@ func (_handle Element) ContextMenu(build func(m *Menu)) Element {
 	return wrapElement(_node.ContextMenu(build))
 }
 
+// CopyText sets what Copy, its shortcut and the context menu's put on
+// the clipboard for the selection of a Selectable container: fn gets its
+// parts, as SelectedTexts returns them, and returns the text, as a
+// document copies its paragraphs with blank lines between them.
+func (_handle Element) CopyText(fn func(parts []SelectedText) string) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.CopyText(fn))
+}
+
 // Cursor sets the pointer's shape over the element.
 func (_handle Element) Cursor(c Cursor) Element {
 	_node := _handle.node()
@@ -4493,6 +4507,20 @@ func (_handle Element) Selected(on bool) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Selected(on))
+}
+
+// SelectedTexts returns the parts of the paragraphs that the selection of
+// a Selectable container holds, in the order they were built, or none,
+// as of the last frame: to copy them otherwise, as a context menu's item
+// does.
+func (_handle Element) SelectedTexts() []SelectedText {
+	_node := _handle.node()
+	if _node == nil {
+		return nil
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.SelectedTexts()
 }
 
 // SelectionColor sets the highlight of selected text in the element and
