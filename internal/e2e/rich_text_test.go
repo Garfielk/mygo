@@ -61,10 +61,12 @@ func TestRichTextEditor(t *testing.T) {
 		mygo.RunOnMain(func() { bold = doc.Formatting().Bold == richtext.FormatOn })
 		return bold
 	})
-	if !compose(w, "世界", 2, false) {
+	// A composition at the caret, then its commit, as an input method
+	// sends them.
+	if !composeOver(w, "世界", 2, false, -1, 0) {
 		t.Skip("input method automation unavailable")
 	}
-	compose(w, "世界", 2, true)
+	composeOver(w, "世界", 2, true, -1, 0)
 	eventually(t, "the composition committed in bold", func() bool { return runs() == "Hello |*世界*|" })
 	// HTML pasted keeps its formats; one undo takes it back.
 	err := mygo.Clipboard.Write(transfer.New(transfer.NewItem(
