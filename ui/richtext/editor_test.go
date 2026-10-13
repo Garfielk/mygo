@@ -1,6 +1,7 @@
 package richtext
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -364,5 +365,132 @@ func TestRichTextCursor(t *testing.T) {
 	}
 	if _, _, ok := find(ui.CursorPointer); !ok {
 		t.Fatal("no hand over the link")
+	}
+}
+
+// TestRichTextComposeUndo checks that undo takes back what an input method
+// committed at a caret, not the typing before it too.
+func TestRichTextComposeUndo(t *testing.T) {
+	doc := NewDocument(Text{})
+	tt, _ := richTester(t, doc)
+	typeRunes(tt, "hello")
+	tt.Key(0, ui.KeyLeft)
+	tt.Key(0, ui.KeyRight)
+	tt.Compose("ni", 2)
+	tt.Type("你")
+	if got := doc.Text().String(); got != "hello你" {
+		t.Fatalf("text %q", got)
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	if got := doc.Text().String(); got != "hello" {
+		t.Fatalf("after undo %q, want %q", got, "hello")
+	}
+}
+
+// TestRichTextComposeDropped checks that a composition the app's selection
+// drops leaves the caret where the app put it.
+func TestRichTextComposeDropped(t *testing.T) {
+	doc := NewDocument(Text{})
+	tt, _ := richTester(t, doc)
+	start, _ := tt.TextCaret()
+	typeRunes(tt, "abc")
+	tt.Compose("nihao", 5)
+	doc.SetSelection(0, 0)
+	tt.Frame()
+	if got, _ := tt.TextCaret(); got.X != start.X {
+		t.Fatalf("caret at x %v, want %v", got.X, start.X)
+	}
+	tt.Type("z")
+	if got := doc.Text().String(); got != "zabc" {
+		t.Fatalf("text %q", got)
+	}
+}
+
+// TestRichTextEnterAtCheckedTask checks that Enter at the start of a
+// checked task keeps it checked, with an empty item above, as Notes.
+func TestRichTextEnterAtCheckedTask(t *testing.T) {
+	doc := NewDocument(TextOf(Paragraph{Runs: []Run{{Text: "done"}}, Style: ParagraphStyle{List: Tasks, Checked: true}}))
+	tt, _ := richTester(t, doc)
+	doc.SetSelection(0, 0)
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	at := doc.Text()
+	if at.String() != "\ndone" || at.ParagraphStyleAt(0).Checked || !at.ParagraphStyleAt(1).Checked {
+		t.Fatalf("%q: checked %v, %v", at.String(), at.ParagraphStyleAt(0).Checked, at.ParagraphStyleAt(1).Checked)
+	}
+}
+
+// TestRichTextTaskBoxOnly checks that a click in the margin away from a
+// task's box doesn't check it.
+func TestRichTextTaskBoxOnly(t *testing.T) {
+	doc := NewDocument(TextOf(Paragraph{Runs: []Run{{Text: "todo"}}, Style: ParagraphStyle{List: Tasks}}))
+	tt, _ := richTester(t, doc)
+	for x := float32(0); x < 40; x += 2 {
+		tt.ClickAt(x, 300)
+	}
+	if doc.Text().ParagraphStyleAt(0).Checked {
+		t.Fatal("a click below the task checked it")
+	}
+}
+
+// TestRichTextUnderscoreInWord checks that snake_case stays as typed.
+func TestRichTextUnderscoreInWord(t *testing.T) {
+	doc := NewDocument(Text{})
+	tt, _ := richTester(t, doc)
+	typeRunes(tt, "snake_case_name and _this_")
+	if got := runsOf(doc.Text()); got != "snake_case_name and |_this_" {
+		t.Fatalf("runs %q", got)
+	}
+}
+
+// TestRichTextCodeBlockSpace checks that a code block's last line gets its
+// space below back when the line after it leaves the block.
+func TestRichTextCodeBlockSpace(t *testing.T) {
+	doc := NewDocument(TextOf(
+		Paragraph{Runs: []Run{{Text: "code"}}, Style: ParagraphStyle{CodeBlock: true}},
+		Paragraph{Style: ParagraphStyle{CodeBlock: true}},
+		Paragraph{Runs: []Run{{Text: "after"}}},
+	))
+	tt, _ := richTester(t, doc)
+	doc.SetSelection(5, 5)
+	tt.Frame()
+	tt.Key(0, ui.KeyEnter)
+	doc.SetSelection(doc.Text().Len(), doc.Text().Len())
+	tt.Frame()
+	got, _ := tt.TextCaret()
+	fresh := NewDocument(doc.Text())
+	ft, _ := richTester(t, fresh)
+	want, _ := ft.TextCaret()
+	if got.Y != want.Y {
+		t.Fatalf("last line at y %v, want %v as laid out afresh", got.Y, want.Y)
+	}
+}
+
+// TestRichTextParagraphKeys checks moving by paragraphs: ⌥↑↓ on macOS,
+// Ctrl+↑↓ elsewhere.
+func TestRichTextParagraphKeys(t *testing.T) {
+	doc := NewDocument(NewText("one two\nthree four\nfive"))
+	tt, _ := richTester(t, doc)
+	mod := ui.Ctrl
+	if runtime.GOOS == "darwin" {
+		mod = ui.Alt
+	}
+	doc.SetSelection(12, 12)
+	tt.Frame()
+	tt.Key(mod, ui.KeyUp)
+	if _, c := doc.Selection(); c != 8 {
+		t.Fatalf("up to %d, want 8", c)
+	}
+	tt.Key(mod, ui.KeyUp)
+	if _, c := doc.Selection(); c != 0 {
+		t.Fatalf("up again to %d, want 0", c)
+	}
+	tt.Key(mod, ui.KeyDown)
+	want := 7 // the end of the paragraph on macOS
+	if runtime.GOOS != "darwin" {
+		want = 8 // the start of the next elsewhere
+	}
+	if _, c := doc.Selection(); c != want {
+		t.Fatalf("down to %d, want %d", c, want)
 	}
 }

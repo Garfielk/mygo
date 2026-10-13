@@ -1,6 +1,7 @@
 package richtext
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -62,16 +63,18 @@ type clipAttachment struct {
 }
 
 // copies keeps the last text copied in this process, by the name its
-// format carries, so that pasting it keeps its attachments.
+// format carries, so that pasting it keeps its attachments. Names start
+// with one random to the process, so that no other app's copy has one.
 var (
 	copies   sync.Map // string → Text
 	copyName atomic.Uint64
 	lastCopy atomic.Value // string
+	process  = rand.Text()
 )
 
 // encodeClip returns t in the clipboard's format.
 func encodeClip(t Text) []byte {
-	name := strconv.FormatUint(copyName.Add(1), 36)
+	name := process + "-" + strconv.FormatUint(copyName.Add(1), 36)
 	if old, ok := lastCopy.Load().(string); ok {
 		copies.Delete(old)
 	}
@@ -153,12 +156,12 @@ func (c clipText) text() Text {
 			a := Attributes{
 				Font: cr.Attributes.Font, Size: cr.Attributes.Size, Weight: cr.Attributes.Weight, Italic: cr.Attributes.Italic,
 				Underline: cr.Attributes.Underline, Strikethrough: cr.Attributes.Strikethrough, Code: cr.Attributes.Code,
-				Link: cr.Attributes.Link, Tag: cr.Attributes.Tag,
+				Link: safeLink(cr.Attributes.Link), Tag: cr.Attributes.Tag,
 			}
 			a.Color, _ = parseCSSColor(cr.Attributes.Color)
 			a.Background, _ = parseCSSColor(cr.Attributes.Background)
 			if at := cr.Attachment; at != nil {
-				a.Attachment = &Attachment{Name: at.Name, URL: at.URL, Width: at.Width, Height: at.Height}
+				a.Attachment = &Attachment{Name: at.Name, URL: at.URL, Width: side(at.Width), Height: side(at.Height)}
 			}
 			p.Runs = append(p.Runs, Run{Text: cr.Text, Attributes: a})
 		}

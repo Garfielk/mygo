@@ -634,16 +634,37 @@ func initTextRanges() {
 			if r == nil {
 				return hr
 			}
-			n := int(int32(count))
-			degenerate := r.start == r.end
+			n, u := int(int32(count)), int(unit)
 			moved := 0
-			if n != 0 {
+			switch {
+			case n == 0:
+			case r.start == r.end:
+				// An insertion point moves as one.
+				moved = r.moveEndpoint(false, u, n)
 				r.end = r.start
-				moved = r.moveEndpoint(false, int(unit), n)
-				r.end = r.start
-				if !degenerate {
-					r.expand(int(unit))
+			case u >= unitPage:
+				// The one page is the whole text: there is none to move to.
+				r.start, r.end = 0, len(r.text())
+			default:
+				// As the UIA documentation says: collapse to the start, back
+				// to the start of its unit, move by units, then take the unit
+				// there; a range doesn't move past the last unit.
+				text, runs := r.text(), r.e.n.TextRuns
+				at := r.start
+				if at < len(text) && !isBoundary(text, runs, at, u) {
+					at = prev(text, runs, at, u)
 				}
+				for ; moved < n; moved++ {
+					nx := next(text, runs, at, u)
+					if nx >= len(text) || nx == at {
+						break
+					}
+					at = nx
+				}
+				for ; moved > n && at > 0; moved-- {
+					at = prev(text, runs, at, u)
+				}
+				r.start, r.end = at, next(text, runs, at, u)
 			}
 			*(*int32)(native(p)) = int32(moved)
 			return sOK

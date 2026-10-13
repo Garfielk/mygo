@@ -1,11 +1,14 @@
 package richtext
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"html"
+	"image"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 	xhtml "golang.org/x/net/html"
@@ -23,6 +26,13 @@ func (t Text) HTML() string {
 	for _, p := range t.Paragraphs() {
 		paras = append(paras, p)
 	}
+	writeBlocks(&b, paras)
+	return b.String()
+}
+
+// writeBlocks writes paragraphs as HTML blocks; those of a quotation in a
+// blockquote, whatever they are.
+func writeBlocks(b *strings.Builder, paras []Paragraph) {
 	// open is the stack of lists open: their tags.
 	var open []string
 	closeLists := func(depth int) {
@@ -34,7 +44,7 @@ func (t Text) HTML() string {
 	for i := 0; i < len(paras); i++ {
 		p := paras[i]
 		st := p.Style
-		if st.List == NoList {
+		if st.List == NoList || st.Quote {
 			closeLists(0)
 		}
 		align := ""
@@ -45,6 +55,18 @@ func (t Text) HTML() string {
 			align = ` style="text-align:right"`
 		}
 		switch {
+		case st.Quote:
+			j := i
+			var quoted []Paragraph
+			for ; j < len(paras) && paras[j].Style.Quote; j++ {
+				q := paras[j]
+				q.Style.Quote = false
+				quoted = append(quoted, q)
+			}
+			b.WriteString("<blockquote>")
+			writeBlocks(b, quoted)
+			b.WriteString("</blockquote>")
+			i = j - 1
 		case st.List != NoList:
 			tag := "ul"
 			if st.List == Numbers {
@@ -75,7 +97,7 @@ func (t Text) HTML() string {
 					b.WriteString(`<input type="checkbox" disabled> `)
 				}
 			}
-			writeRuns(&b, p.Runs)
+			writeRuns(b, p.Runs)
 		case st.CodeBlock:
 			b.WriteString("<pre><code>")
 			for ; i < len(paras) && paras[i].Style.CodeBlock; i++ {
@@ -88,28 +110,64 @@ func (t Text) HTML() string {
 			}
 			i--
 			b.WriteString("</code></pre>")
-		case st.Quote:
-			b.WriteString("<blockquote>")
-			for ; i < len(paras) && paras[i].Style.Quote && paras[i].Style.List == NoList; i++ {
-				tag := blockTag(paras[i].Style)
-				b.WriteString("<" + tag + ">")
-				writeRuns(&b, paras[i].Runs)
-				b.WriteString("</" + tag + ">")
-			}
-			i--
-			b.WriteString("</blockquote>")
 		default:
 			tag := blockTag(st)
 			b.WriteString("<" + tag + align + ">")
 			if len(p.Runs) == 0 {
 				b.WriteString("<br>")
 			}
-			writeRuns(&b, p.Runs)
+			writeRuns(b, p.Runs)
 			b.WriteString("</" + tag + ">")
 		}
 	}
 	closeLists(0)
-	return b.String()
+}
+
+// imageSide returns the width or height an img's attribute gives, or 0.
+func imageSide(s string) float32 {
+	v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(s), "px"), 32)
+	if err != nil {
+		return 0
+	}
+	return side(float32(v))
+}
+
+// side returns v as an attachment's width or height: 0, for its picture's,
+// unless it is a size, not negative, infinite or not a number.
+func side(v float32) float32 {
+	if !(v > 0) || v > 1e5 {
+		return 0
+	}
+	return v
+}
+
+// maxImagePixels is how many pixels a pasted picture may have, so a small
+// file that claims a huge size takes no gigabytes to decode.
+const maxImagePixels = 1 << 25
+
+// smallImage reports whether the picture of data is small enough to decode.
+func smallImage(data []byte) bool {
+	c, _, err := image.DecodeConfig(bytes.NewReader(data))
+	return err == nil && c.Width > 0 && c.Height > 0 && int64(c.Width)*int64(c.Height) <= maxImagePixels
+}
+
+// safeLink returns a link's URL, or "" for one that runs a script where a
+// browser opens it: javascript:, vbscript: and data:, written as browsers
+// read them, with spaces before and tabs or newlines within.
+func safeLink(s string) string {
+	s = strings.TrimFunc(s, func(r rune) bool { return r <= ' ' })
+	scheme := strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, s)
+	for _, bad := range []string{"javascript:", "vbscript:", "data:"} {
+		if strings.HasPrefix(scheme, bad) {
+			return ""
+		}
+	}
+	return s
 }
 
 // blockTag returns the tag of a paragraph of style st: p, or h1 to h6.
@@ -126,8 +184,8 @@ func writeRuns(b *strings.Builder, runs []Run) {
 	for i := 0; i < len(runs); i++ {
 		r := runs[i]
 		a := r.Attributes
-		if a.Link != "" {
-			b.WriteString(`<a href="` + html.EscapeString(a.Link) + `">`)
+		if link := safeLink(a.Link); link != "" {
+			b.WriteString(`<a href="` + html.EscapeString(link) + `">`)
 			for ; i < len(runs) && runs[i].Attributes.Link == a.Link; i++ {
 				writeRun(b, runs[i])
 			}
@@ -398,15 +456,10 @@ func (b *htmlBuilder) node(n *xhtml.Node, a Attributes) {
 	case atom.Img:
 		src, alt := attr(n, "src"), attr(n, "alt")
 		at := &Attachment{Name: alt, URL: src}
-		if w, err := strconv.ParseFloat(attr(n, "width"), 32); err == nil {
-			at.Width = float32(w)
-		}
-		if h, err := strconv.ParseFloat(attr(n, "height"), 32); err == nil {
-			at.Height = float32(h)
-		}
+		at.Width, at.Height = imageSide(attr(n, "width")), imageSide(attr(n, "height"))
 		if data, ok := strings.CutPrefix(src, "data:"); ok {
 			if _, enc, ok := strings.Cut(data, ";base64,"); ok {
-				if raw, err := base64.StdEncoding.DecodeString(enc); err == nil {
+				if raw, err := base64.StdEncoding.DecodeString(enc); err == nil && smallImage(raw) {
 					if bm, err := ui.DecodeBitmap(raw); err == nil {
 						at.Image = bm
 						at.URL = ""
@@ -442,9 +495,7 @@ func (b *htmlBuilder) node(n *xhtml.Node, a Attributes) {
 			a.Code = true
 		}
 	case atom.A:
-		if href := attr(n, "href"); href != "" && !strings.HasPrefix(strings.ToLower(href), "javascript:") {
-			a.Link = href
-		}
+		a.Link = safeLink(attr(n, "href"))
 	case atom.Ul, atom.Ol:
 		b.flush()
 		kind := Bullets
@@ -465,7 +516,7 @@ func (b *htmlBuilder) node(n *xhtml.Node, a Attributes) {
 		if k := len(b.lists); k > 0 {
 			kind = b.lists[k-1]
 		}
-		b.style = ParagraphStyle{List: kind, Indent: max(len(b.lists)-1, 0), Align: saved.Align}
+		b.style = ParagraphStyle{List: kind, Indent: max(len(b.lists)-1, 0), Align: saved.Align, Quote: saved.Quote}
 		block = true
 	case atom.P, atom.Div, atom.Section, atom.Article, atom.Header, atom.Footer, atom.Main, atom.Aside, atom.Nav,
 		atom.Figure, atom.Figcaption, atom.Tr, atom.Dt, atom.Dd, atom.Address, atom.Center:
@@ -473,7 +524,7 @@ func (b *htmlBuilder) node(n *xhtml.Node, a Attributes) {
 		block = true
 	case atom.H1, atom.H2, atom.H3, atom.H4, atom.H5, atom.H6:
 		b.flush()
-		b.style = ParagraphStyle{Heading: int(n.Data[1] - '0'), Align: saved.Align}
+		b.style = ParagraphStyle{Heading: int(n.Data[1] - '0'), Align: saved.Align, Quote: saved.Quote}
 		block = true
 	case atom.Blockquote:
 		b.flush()
@@ -481,7 +532,7 @@ func (b *htmlBuilder) node(n *xhtml.Node, a Attributes) {
 		block = true
 	case atom.Pre:
 		b.flush()
-		b.style = ParagraphStyle{CodeBlock: true, Indent: saved.Indent}
+		b.style = ParagraphStyle{CodeBlock: true, Indent: saved.Indent, Quote: saved.Quote}
 		b.pre++
 		defer func() { b.pre-- }()
 		block = true

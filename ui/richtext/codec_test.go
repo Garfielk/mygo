@@ -1,6 +1,7 @@
 package richtext
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -175,5 +176,106 @@ func TestParseRTF(t *testing.T) {
 	}
 	if st := got.ParagraphStyleAt(got.Len()); st.List != Bullets {
 		t.Fatalf("list: %+v", st)
+	}
+}
+
+// TestMarkdownEscapes checks that what Markdown would read as more than
+// text stays text: block starts in items and headings, a heading's
+// closing #s, indentation, entities, images and backticks in code.
+func TestMarkdownEscapes(t *testing.T) {
+	para := func(st ParagraphStyle, runs ...Run) Paragraph { return Paragraph{Style: st, Runs: runs} }
+	for _, c := range []struct {
+		text Text
+		want string
+	}{
+		{TextOf(para(ParagraphStyle{List: Bullets}, Run{Text: "# not a heading"})), `- \# not a heading`},
+		{TextOf(para(ParagraphStyle{List: Numbers}, Run{Text: "> x"})), `1. \> x`},
+		{TextOf(para(ParagraphStyle{Heading: 2}, Run{Text: "Issue #"})), `## Issue \#`},
+		{NewText("---"), `\---`},
+		{NewText("-"), `\-`},
+		{NewText("    indented"), `&#32;&#32;&#32;&#32;indented`},
+		{NewText("Tom &amp; Jerry & co"), `Tom \&amp; Jerry & co`},
+		{TextOf(para(ParagraphStyle{}, Run{Text: "x!"}, Run{Text: "y", Attributes: Attributes{Link: "http://e"}})), `x\![y](http://e)`},
+		{TextOf(para(ParagraphStyle{}, Run{Text: "a``b", Attributes: Attributes{Code: true}})), "```a``b```"},
+		{TextOf(para(ParagraphStyle{}, Run{Text: "`x", Attributes: Attributes{Code: true}})), "`` `x ``"},
+	} {
+		if got := c.text.Markdown(); got != c.want {
+			t.Errorf("%q: got %q, want %q", c.text.String(), got, c.want)
+		}
+	}
+}
+
+// TestCodecsSanitize checks what pasted documents may not bring: styles
+// out of range, links that run scripts, sizes that aren't, pictures too
+// large to decode, and another app's copy taken for this one's.
+func TestCodecsSanitize(t *testing.T) {
+	at, ok := decodeClip([]byte(`{"paragraphs":[{"style":{"list":1,"indent":-1,"heading":99},"runs":[{"text":"x","attributes":{"link":" javascript:alert(1)"}}]}]}`))
+	if !ok {
+		t.Fatal("not decoded")
+	}
+	if st := at.ParagraphStyleAt(0); st.Indent != 0 || st.Heading != 6 {
+		t.Errorf("style %+v", st)
+	}
+	_ = at.HTML()
+	_ = at.Markdown()
+	for _, src := range []string{`<a href=" javascript:alert(1)">x</a>`, "<a href=\"java\tscript:alert(1)\">x</a>", `<a href="VBScript:x">x</a>`} {
+		if l := ParseHTML(src).AttributesAt(0).Link; l != "" {
+			t.Errorf("%s: link %q", src, l)
+		}
+	}
+	if l := ParseRTF([]byte(`{\rtf1{\field{\*\fldinst HYPERLINK "javascript:alert(1)"}{\fldrslt x}}}`)).AttributesAt(0).Link; l != "" {
+		t.Errorf("RTF link %q", l)
+	}
+	if h := TextOf(Paragraph{Runs: []Run{{Text: "x", Attributes: Attributes{Link: "javascript:alert(1)"}}}}).HTML(); strings.Contains(h, "javascript") {
+		t.Errorf("HTML %s", h)
+	}
+	img := ParseHTML(`<img src="x.png" width="NaN" height="-Inf">`)
+	if a := img.AttributesAt(0).Attachment; a == nil || a.Width != 0 || a.Height != 0 {
+		t.Errorf("attachment %+v", a)
+	} else if _, err := img.MarshalJSON(); err != nil {
+		t.Error(err)
+	}
+	// Another app's copy with the name of this one's is its own text.
+	encodeClip(NewText("my old copy"))
+	if got, _ := decodeClip([]byte(`{"copy":"1","paragraphs":[{"runs":[{"text":"theirs"}]}]}`)); got.String() != "theirs" {
+		t.Errorf("pasted %q", got.String())
+	}
+}
+
+// TestHTMLQuotes checks that quoted lists, headings and code stay quoted
+// through HTML.
+func TestHTMLQuotes(t *testing.T) {
+	in := TextOf(
+		Paragraph{Style: ParagraphStyle{Quote: true, Heading: 2}, Runs: []Run{{Text: "QH"}}},
+		Paragraph{Style: ParagraphStyle{Quote: true, List: Bullets}, Runs: []Run{{Text: "item"}}},
+		Paragraph{Style: ParagraphStyle{Quote: true, CodeBlock: true}, Runs: []Run{{Text: "code"}}},
+		Paragraph{Runs: []Run{{Text: "after"}}},
+	)
+	out := ParseHTML(in.HTML())
+	i := 0
+	for _, p := range out.Paragraphs() {
+		want := i < 3
+		i++
+		if p.Style.Quote != want {
+			t.Errorf("paragraph %d %v: quote %v (%s)", i, p.Runs, p.Style.Quote, in.HTML())
+		}
+	}
+}
+
+// TestRTFWordPad checks what WordPad and Word write: lists of \pntext,
+// table cells, hidden text, non-breaking hyphens and links to bookmarks.
+func TestRTFWordPad(t *testing.T) {
+	at := ParseRTF([]byte(`{\rtf1{\pntext\f1\'B7\tab}{\*\pn\pnlvlblt{\pntxtb\'B7}}one\par{\pntext 1.\tab}{\*\pn\pnlvlbody}first\par
+e\_mail vis{\v hid}ible\par alpha\cell beta\cell\row {\field{\*\fldinst HYPERLINK \\l "top"}{\fldrslt up}}\par}`))
+	var got []string
+	for _, p := range at.Paragraphs() {
+		got = append(got, fmt.Sprintf("%d:%s", p.Style.List, plainOf(p)))
+	}
+	want := []string{"1:one", "2:first", "0:e‑mail visible", "0:alpha\tbeta\t", "0:up"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if l := at.AttributesAt(at.Len() - 1).Link; l != "#top" {
+		t.Errorf("link %q", l)
 	}
 }

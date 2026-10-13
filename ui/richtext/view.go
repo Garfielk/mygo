@@ -163,6 +163,8 @@ type paraView struct {
 	compose      string
 	at           int
 	h            float32
+	// space is the space above and below it, in h.
+	space float32
 }
 
 // look is how the text of an editor looks: its font and the theme's
@@ -309,7 +311,8 @@ func (v *view) lockedSync() (change, bool) {
 		v.selAnchor, v.caret = d.anchor, d.caret
 		v.affinity = ui.TextDownstream
 		v.hasDesired = false
-		v.compose = ""
+		v.compose, v.composing = "", false
+		v.composeCaret, v.composeSelected = 0, ui.TextInputRange{}
 		v.reveal = true
 	}
 	return c, moved
@@ -518,6 +521,13 @@ func (v *view) paraLayout(p int) *paraView {
 		first = unsafe.SliceData(para.runs)
 	}
 	if pv.layout != nil && pv.id == para.id && pv.runs == first && pv.nruns == len(para.runs) && pv.style == para.style && pv.compose == compose && pv.at == at {
+		// The space around it follows its neighbours, which may have
+		// changed without it: a code block's last line, the first heading.
+		if above, below := v.space(p, para.style); above+below != pv.space {
+			h := pv.h - pv.space + above + below
+			v.hs.add(p, float64(h-pv.h), 0)
+			pv.h, pv.space = h, above+below
+		}
 		return pv
 	}
 	composed := compose
@@ -582,7 +592,7 @@ func (v *view) paraLayout(p int) *paraView {
 		v.hs.add(p, float64(h), -1)
 	}
 	*pv = paraView{layout: l, units: units, id: para.id, runs: first, nruns: len(para.runs), style: para.style,
-		compose: composed, at: at, h: h}
+		compose: composed, at: at, h: h, space: above + below}
 	return pv
 }
 
@@ -645,9 +655,20 @@ func (v *view) caretAt(i, extra int, affinity ui.TextAffinity) (x float32, y flo
 
 // positionAt returns the caret position closest to (x, y) in the content.
 func (v *view) positionAt(x float32, y float64) (int, ui.TextAffinity) {
+	p, l, aff := v.layoutPositionAt(x, y)
+	if p < 0 {
+		return v.shown.Len(), ui.TextUpstream
+	}
+	return v.global(p, l), aff
+}
+
+// layoutPositionAt returns the paragraph closest to (x, y) in the content
+// and the rune of its layout there, which holds the composition; p is -1
+// past the paragraphs.
+func (v *view) layoutPositionAt(x float32, y float64) (p, l int, aff ui.TextAffinity) {
 	n := len(v.paras)
 	y = max(y, 0)
-	p := v.hs.at(y)
+	p = v.hs.at(y)
 	for range n {
 		pv := v.paraLayout(p)
 		top := v.hs.top(p)
@@ -659,10 +680,10 @@ func (v *view) positionAt(x float32, y float64) (int, ui.TextAffinity) {
 		default:
 			ox, oy := v.origin(p)
 			pos := pv.layout.PositionAt(ui.Point{X: x - ox, Y: float32(y - oy)})
-			return v.global(p, pv.runeOfUnit(pos.Index)), pos.Affinity
+			return p, pv.runeOfUnit(pos.Index), pos.Affinity
 		}
 	}
-	return v.shown.Len(), ui.TextUpstream
+	return -1, 0, ui.TextUpstream
 }
 
 // lineEdges returns the edges of the visual line holding rune i.

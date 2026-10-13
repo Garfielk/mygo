@@ -263,12 +263,35 @@ func (v *view) key(key ui.Key, mods ui.Modifiers) bool {
 		v.hasDesired = false
 		return true
 	case ui.KeyUp, ui.KeyDown:
-		if mac && m == ui.Super || m == ui.Ctrl && !mac {
+		if mac && m == ui.Super {
 			if key == ui.KeyUp {
 				v.moveTo(0, ui.TextDownstream, shift)
 			} else {
 				v.moveTo(n, ui.TextDownstream, shift)
 			}
+			return true
+		}
+		if mac && m == ui.Alt || !mac && m == ui.Ctrl {
+			// By paragraphs: up to the start of this one or the one
+			// before; down to the end of this one or the next on macOS,
+			// as NSTextView, to the start of the next elsewhere, as
+			// WordPad and GTK.
+			a, z := v.shown.ParagraphRange(v.caret)
+			switch {
+			case key == ui.KeyUp && v.caret == a && a > 0:
+				a, _ = v.shown.ParagraphRange(a - 1)
+				v.moveTo(a, ui.TextDownstream, shift)
+			case key == ui.KeyUp:
+				v.moveTo(a, ui.TextDownstream, shift)
+			case mac && v.caret == z && z < n:
+				_, z = v.shown.ParagraphRange(z + 1)
+				v.moveTo(z, ui.TextUpstream, shift)
+			case mac:
+				v.moveTo(z, ui.TextUpstream, shift)
+			default:
+				v.moveTo(min(z+1, n), ui.TextDownstream, shift)
+			}
+			v.hasDesired = false
 			return true
 		}
 		if m != 0 {
@@ -607,7 +630,7 @@ func (v *view) release(ev ui.InputEvent) bool {
 	if link != "" && v.caret == v.selAnchor {
 		if v.opts.OnLink != nil {
 			v.opts.OnLink(link)
-		} else {
+		} else if link := safeLink(link); link != "" {
 			v.services.OpenURL(link)
 		}
 	}
@@ -626,7 +649,12 @@ func (v *view) taskBox(x float32, y float64) (int, bool) {
 		return 0, false
 	}
 	left, _ := v.insets(st)
-	return p, x >= left-v.look.indent && x < left-2
+	if x < left-v.look.indent || x >= left-2 {
+		return p, false
+	}
+	// Beside the first line, where the box is.
+	_, top, h := v.caretAt(v.shown.paraStart(p), 0, ui.TextDownstream)
+	return p, y >= top && y < top+float64(h)
 }
 
 // overScrollbar reports whether x of the element is on the scroll bar.

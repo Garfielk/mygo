@@ -42,6 +42,16 @@ func (d *Document) Formatting() Formatting {
 func (d *Document) formatting() Formatting {
 	a, z := d.span()
 	f := Formatting{Attributes: d.typingAttributes()}
+	if a < z {
+		// From the first rune that takes a format, not a newline.
+		for _, r := range d.text.Runs(a, z) {
+			if r.Text != "\n" {
+				f.Attributes = r.Attributes
+				f.Attributes.Attachment = nil
+				break
+			}
+		}
+	}
 	state := func(on bool) FormatState {
 		if on {
 			return FormatOn
@@ -306,7 +316,12 @@ func (d *Document) InsertText(s string) {
 	defer d.mu.Unlock()
 	a, z := d.span()
 	attrs := d.typingAttributes()
-	d.edit(false, func(e *Edit) { e.ReplaceString(a, z, s, attrs) })
+	d.edit(false, func(e *Edit) {
+		n := e.Text().Len()
+		e.ReplaceString(a, z, s, attrs)
+		end := z + e.Text().Len() - n
+		e.Select(end, end)
+	})
 }
 
 // Insert replaces the selection with text, as a paste does.
@@ -314,7 +329,10 @@ func (d *Document) Insert(text Text) {
 	d.lock()
 	defer d.mu.Unlock()
 	a, z := d.span()
-	d.edit(false, func(e *Edit) { e.Replace(a, z, text) })
+	d.edit(false, func(e *Edit) {
+		e.Replace(a, z, text)
+		e.Select(a+text.Len(), a+text.Len())
+	})
 }
 
 // InsertAttachment replaces the selection with an attachment.
@@ -324,7 +342,10 @@ func (d *Document) InsertAttachment(a *Attachment) {
 	s, z := d.span()
 	attrs := d.typingAttributes().extending()
 	attrs.Attachment = a
-	d.edit(false, func(e *Edit) { e.ReplaceString(s, z, string(ObjectReplacement), attrs) })
+	d.edit(false, func(e *Edit) {
+		e.ReplaceString(s, z, string(ObjectReplacement), attrs)
+		e.Select(s+1, s+1)
+	})
 }
 
 // normalizeNewlines turns the newlines of other systems into "\n".

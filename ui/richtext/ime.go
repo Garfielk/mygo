@@ -111,7 +111,7 @@ func (v *view) ReplaceText(r *ui.TextInputRange, s string) {
 	switch {
 	case r == nil && v.compose != "":
 		v.compose = ""
-		v.mode = sameStep
+		v.joinStep()
 		v.replace(v.caret, v.caret, s)
 	case r == nil:
 		v.insert(s)
@@ -126,7 +126,7 @@ func (v *view) ReplaceText(r *ui.TextInputRange, s string) {
 		if !transaction {
 			v.record(false)
 		} else {
-			v.mode = sameStep
+			v.joinStep()
 		}
 		v.replace(a, z, s)
 	}
@@ -154,7 +154,7 @@ func (v *view) SetMarkedText(r *ui.TextInputRange, s string, selected ui.TextInp
 		if !transaction {
 			v.record(false)
 		} else {
-			v.mode = sameStep
+			v.joinStep()
 		}
 		v.composing = true
 		if a != z {
@@ -189,11 +189,14 @@ func (v *view) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange, 
 		return ui.Rect{}, ui.TextInputRange{}, false
 	}
 	i := v.virtualRune(min(r.Start, r.End))
-	extra := 0
-	base := i
+	// A rune of the text and how far past it in the composition.
+	base, extra := i, 0
 	if n := utf8.RuneCountInString(v.compose); i > v.caret && n > 0 {
-		base = max(v.caret, i-n)
-		extra = i - base
+		if i <= v.caret+n {
+			base, extra = v.caret, i-v.caret
+		} else {
+			base = i - n
+		}
 	}
 	x, y, h := v.caretAt(base, extra, v.affinity)
 	b := ui.Rect{X: v.padX + x, Y: v.padY + float32(y-v.scroll), W: 1, H: h}
@@ -215,6 +218,16 @@ func (v *view) IndexForPoint(p ui.Point) (int, bool) {
 		return 0, false
 	}
 	x, y := v.contentPoint(p.X, p.Y)
-	i, _ := v.positionAt(x, y)
+	para, l, _ := v.layoutPositionAt(x, y)
+	n := utf8.RuneCountInString(v.compose)
+	// The rune of the text with the composition: the layout of the
+	// caret's paragraph holds it, those after it are past it.
+	i := v.shown.Len() + n
+	if para >= 0 {
+		i = v.shown.paraStart(para) + l
+		if cp := v.shown.paraAt(v.caret); n > 0 && para > cp {
+			i += n
+		}
+	}
 	return v.virtualUnits(i), true
 }

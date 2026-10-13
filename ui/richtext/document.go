@@ -151,6 +151,11 @@ func typingAttributes(t Text, start, end int) Attributes {
 		return t.AttributesAt(start).extending()
 	}
 	before, after := t.AttributesAt(start-1), t.AttributesAt(start)
+	if _, pe := t.ParagraphRange(start); start == pe {
+		// The newline: a link or code ends with the line, as a selection
+		// of whole lines formats newlines too.
+		after = Attributes{}
+	}
 	a := before.extending()
 	// What does not extend holds inside: between two runes of a link.
 	if before.Link == after.Link {
@@ -284,7 +289,9 @@ func (e *Edit) FormatParagraphs(start, end int, fn func(p *ParagraphStyle)) {
 	pa, pz := t.paragraphSpan(start, end)
 	a := t.paraStart(pa)
 	z := t.paraStart(pz) + seqAt(t.seq(), pz).n
-	e.d.apply(e.step, a, z-a, z-a, t.FormatParagraphs(start, end, fn))
+	if f := t.FormatParagraphs(start, end, fn); !f.Same(t) {
+		e.d.apply(e.step, a, z-a, z-a, f)
+	}
 }
 
 // apply makes t, in which the runes from start to start+removed of the text
@@ -348,9 +355,9 @@ func mapPosition(p, start, removed, inserted int, upper bool) int {
 // Edit changes the document with fn, as one step of undo, which undoing
 // takes back whole with the selection before it:
 //
-//	doc.Edit(func(e *ui.Edit) {
-//		e.ReplaceString(0, 0, "Dear Ann,\n", ui.Attributes{})
-//		e.Format(0, 8, func(a *ui.Attributes) { a.Italic = true })
+//	doc.Edit(func(e *richtext.Edit) {
+//		e.ReplaceString(0, 0, "Dear Ann,\n", richtext.Attributes{})
+//		e.Format(0, 8, func(a *richtext.Attributes) { a.Italic = true })
 //	})
 func (d *Document) Edit(fn func(e *Edit)) {
 	d.lock()
@@ -367,10 +374,6 @@ func (d *Document) edit(join bool, fn func(e *Edit)) {
 		step = &d.undo[len(d.undo)-1]
 	} else {
 		d.undo = append(d.undo, undoStep{before: d.text, after: d.text, selBefore: [2]int{d.anchor, d.caret}, start: -1})
-		if len(d.undo) > 200 {
-			d.undo[0] = undoStep{}
-			d.undo = d.undo[1:]
-		}
 		step = &d.undo[len(d.undo)-1]
 	}
 	fn(&Edit{d: d, step: step})
@@ -378,6 +381,10 @@ func (d *Document) edit(join bool, fn func(e *Edit)) {
 		// Nothing changed.
 		d.undo = d.undo[:len(d.undo)-1]
 		return
+	}
+	if len(d.undo) > 200 {
+		d.undo[0] = undoStep{}
+		d.undo = d.undo[1:]
 	}
 	step.selAfter = [2]int{d.anchor, d.caret}
 	clear(d.redo)

@@ -44,6 +44,9 @@ const modifierMask = 1<<0 | 1<<2 | 1<<3 | 1<<26 | 1<<27 | 1<<28
 var editCommands = map[string]string{
 	"undo": "Undo", "redo": "Redo", "cut": "Cut", "copy": "Copy", "paste": "Paste",
 	"pasteAndMatchStyle": "PasteAsPlainText", "delete": "Delete", "selectAll": "SelectAll",
+	// The Format menu's.
+	"bold": "Bold", "italic": "Italic", "underline": "Underline", "strikethrough": "Strikethrough",
+	"alignLeft": "JustifyLeft", "alignCenter": "JustifyCenter", "alignRight": "JustifyRight",
 }
 
 func initMenuCallbacks() {

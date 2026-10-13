@@ -79,7 +79,18 @@ func (t Text) Markdown() string {
 		default:
 			b.WriteString(quote)
 		}
-		writeMarkdownRuns(&b, p.Runs, st.List == NoList && st.Heading == 0)
+		if st.Heading > 0 {
+			// A heading's closing #s are not its text: escape them.
+			var h strings.Builder
+			writeMarkdownRuns(&h, p.Runs)
+			s := h.String()
+			if k := len(strings.TrimRight(s, "#")); k < len(s) {
+				s = s[:k] + "\\" + s[k:]
+			}
+			b.WriteString(s)
+			continue
+		}
+		writeMarkdownRuns(&b, p.Runs)
 	}
 	return b.String()
 }
@@ -94,9 +105,10 @@ func plainOf(p Paragraph) string {
 }
 
 // mark is a Markdown mark around runs: a link (by its URL), bold, italic,
-// strikethrough, underline or code, from the outside in.
+// strikethrough or underline, from the outside in. Code is a span of each
+// run, fenced as its backticks need.
 type mark struct {
-	kind byte // 'a', 'b', 'i', 's', 'u', '`'
+	kind byte // 'a', 'b', 'i', 's', 'u'
 	url  string
 }
 
@@ -117,9 +129,6 @@ func marksOf(a Attributes) []mark {
 	if a.Underline {
 		m = append(m, mark{kind: 'u'})
 	}
-	if a.Code {
-		m = append(m, mark{kind: '`'})
-	}
 	return m
 }
 
@@ -136,7 +145,7 @@ func (m mark) open() string {
 	case 'u':
 		return "<u>"
 	}
-	return "`"
+	return "~~"
 }
 
 func (m mark) close() string {
@@ -151,9 +160,9 @@ func (m mark) close() string {
 
 // writeMarkdownRuns writes runs with their marks, opening and closing
 // them as they change, whitespace outside them so that they flank words
-// as CommonMark wants. At the start of a body paragraph, what would start
-// a block is escaped.
-func writeMarkdownRuns(b *strings.Builder, runs []Run, body bool) {
+// as CommonMark wants. What would start a block at the start of the
+// paragraph is escaped, as the text of an item or a heading too.
+func writeMarkdownRuns(b *strings.Builder, runs []Run) {
 	var open []mark
 	pending := ""
 	first := true
@@ -185,6 +194,11 @@ func writeMarkdownRuns(b *strings.Builder, runs []Run, body bool) {
 			k++
 		}
 		closeTo(k)
+		if first {
+			// Spaces at the start would make a block of code.
+			lead = strings.NewReplacer(" ", "&#32;", "\t", "&#9;").Replace(pending + lead)
+			pending = ""
+		}
 		b.WriteString(pending + lead)
 		for _, m := range want[k:] {
 			b.WriteString(m.open())
@@ -194,8 +208,12 @@ func writeMarkdownRuns(b *strings.Builder, runs []Run, body bool) {
 			b.WriteString(codeSpan(core))
 		} else {
 			s := escapeMarkdown(core)
-			if first && body {
+			if first {
 				s = escapeBlockStart(s)
+			}
+			if strings.HasSuffix(s, "!") {
+				// Not an image with a link after it.
+				s = s[:len(s)-1] + "\\!"
 			}
 			b.WriteString(s)
 		}
@@ -206,22 +224,37 @@ func writeMarkdownRuns(b *strings.Builder, runs []Run, body bool) {
 	b.WriteString(pending)
 }
 
-// codeSpan returns s as the inside of a code span whose marks the caller
-// writes: backticks inside it take a longer fence.
+// codeSpan returns s as a code span, fenced by more backticks than any
+// run of them in it.
 func codeSpan(s string) string {
-	if !strings.Contains(s, "`") {
-		return s
+	longest, n := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			n++
+			longest = max(longest, n)
+		} else {
+			n = 0
+		}
 	}
-	return "` " + s + " `"
+	fence := strings.Repeat("`", longest+1)
+	if strings.HasPrefix(s, "`") || strings.HasSuffix(s, "`") {
+		s = " " + s + " "
+	}
+	return fence + s + fence
 }
 
 // escapeMarkdown escapes what Markdown would read as marks.
 func escapeMarkdown(s string) string {
 	var b strings.Builder
-	for _, r := range s {
+	for i, r := range s {
 		switch r {
 		case '\\', '*', '_', '`', '[', ']', '<', '~':
 			b.WriteByte('\\')
+		case '&':
+			// Not the start of an entity, as &amp; or &#38;.
+			if i+1 < len(s) && (s[i+1] == '#' || unicode.IsLetter(rune(s[i+1]))) {
+				b.WriteByte('\\')
+			}
 		}
 		b.WriteRune(r)
 	}
@@ -232,7 +265,7 @@ func escapeMarkdown(s string) string {
 // would read as a heading, a list, a quotation or a rule.
 func escapeBlockStart(s string) string {
 	switch {
-	case strings.HasPrefix(s, "#"), strings.HasPrefix(s, ">"), strings.HasPrefix(s, "- "), strings.HasPrefix(s, "+ "):
+	case strings.HasPrefix(s, "#"), strings.HasPrefix(s, ">"), strings.HasPrefix(s, "-"), strings.HasPrefix(s, "+"), strings.HasPrefix(s, "="):
 		return "\\" + s
 	}
 	i := 0

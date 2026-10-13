@@ -143,6 +143,20 @@ const (
 	Tasks
 )
 
+// normalized returns the style with its levels in range, as text pasted
+// or loaded may have any.
+func (s ParagraphStyle) normalized() ParagraphStyle {
+	s.Heading = max(0, min(s.Heading, 6))
+	s.Indent = max(0, min(s.Indent, maxIndent))
+	if s.List > Tasks {
+		s.List = NoList
+	}
+	if s.List != Tasks {
+		s.Checked = false
+	}
+	return s
+}
+
 // ParagraphStyle is the style of a paragraph of an Text: what it
 // is (a heading, an item of a list, a quote, a block of code) and how its
 // lines align. Lists are flat, as in Quill and Automerge: an item's Indent
@@ -200,7 +214,7 @@ type attrRun struct {
 var paraIDs atomic.Uint64
 
 func newPara(style ParagraphStyle, runs []attrRun) richPara {
-	p := richPara{id: paraIDs.Add(1), style: style, runs: runs}
+	p := richPara{id: paraIDs.Add(1), style: style.normalized(), runs: runs}
 	for _, r := range runs {
 		p.n += r.n
 	}
@@ -605,19 +619,25 @@ func (t Text) Format(start, end int, fn func(a *Attributes)) Text {
 		return t
 	}
 	pa, pz := t.paraAt(start), t.paraAt(end)
-	if end == t.paraStart(pz) && pz > pa {
+	if end == t.paraStart(pz) && pz > pa && end < n {
 		pz-- // up to the newline ending the paragraph before
 	}
 	at := t.paraStart(pa)
 	out := make([]richPara, 0, pz-pa+1)
+	changed := false
 	seqEach(t.seq(), pa, func(i int, p *richPara) bool {
 		from, to := max(start-at, 0), min(end-at, p.n+1)
+		if end == n && i == pz {
+			// To the end of the text: what typing gets there too.
+			to = p.n + 1
+		}
 		runs := cutRuns(nil, p.runs, 0, from)
 		mid := cutRuns(nil, p.runs, from, to)
 		for _, r := range mid {
 			b := r.a
 			fn(&b)
 			b.Attachment = r.a.Attachment
+			changed = changed || b != r.a
 			runs = appendRun(runs, attrRun{r.n, b})
 		}
 		runs = cutRuns(runs, p.runs, to, p.n+1)
@@ -627,6 +647,9 @@ func (t Text) Format(start, end int, fn func(a *Attributes)) Text {
 		at += p.n + 1
 		return i < pz
 	})
+	if !changed {
+		return t
+	}
 	return Text{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
 }
 
@@ -636,12 +659,18 @@ func (t Text) Format(start, end int, fn func(a *Attributes)) Text {
 func (t Text) FormatParagraphs(start, end int, fn func(p *ParagraphStyle)) Text {
 	pa, pz := t.paragraphSpan(start, end)
 	out := make([]richPara, 0, pz-pa+1)
+	changed := false
 	seqEach(t.seq(), pa, func(i int, p *richPara) bool {
 		q := *p
 		fn(&q.style)
+		q.style = q.style.normalized()
+		changed = changed || q.style != p.style
 		out = append(out, q)
 		return i < pz
 	})
+	if !changed {
+		return t
+	}
 	return Text{text: t.text, paras: seqReplace(t.seq(), pa, pz+1, out)}
 }
 

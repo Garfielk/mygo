@@ -161,13 +161,22 @@ func (v *view) deleteRange(a, z int, typing bool) {
 	v.replace(min(a, z), max(a, z), "")
 }
 
+// joinStep makes the next edit join the step of the edit before it, unless
+// the action started a step no edit made yet: a composition at a caret
+// starts one that its commit makes.
+func (v *view) joinStep() {
+	if v.mode != newStep {
+		v.mode = sameStep
+	}
+}
+
 // commitCompose puts the composition into the text, in the typing
 // attributes, as part of the step its start made.
 func (v *view) commitCompose() {
 	if v.compose != "" {
 		s := v.compose
 		v.compose = ""
-		v.mode = sameStep
+		v.joinStep()
 		v.replace(v.caret, v.caret, s)
 	}
 	v.composeCaret, v.composeSelected = 0, ui.TextInputRange{}
@@ -242,6 +251,7 @@ func (v *view) enter() {
 		}
 	}
 	atEnd := v.caret == pe && a == z
+	atStart := a == z && a == ps && ps < pe
 	v.doc.lock()
 	v.lockedPublish()
 	attrs := v.doc.typingAttributes()
@@ -251,7 +261,13 @@ func (v *view) enter() {
 	d := v.doc
 	d.lock()
 	v.lockedEdit(func(e *Edit) {
-		e.FormatParagraphs(v.caret, v.caret, func(s *ParagraphStyle) {
+		// The new paragraph: after the caret's, or before it at its start,
+		// as Notes keeps the item it moves down checked.
+		at := v.caret
+		if atStart {
+			at = v.caret - 1
+		}
+		e.FormatParagraphs(at, at, func(s *ParagraphStyle) {
 			if atEnd && s.Heading > 0 {
 				s.Heading = 0
 			}
@@ -343,6 +359,10 @@ func (v *view) inlineShortcut(ps int, before []rune) {
 			if (i > 0 && before[i-1] == last) || before[i+m] == last || unicode.IsSpace(before[i+m]) {
 				continue
 			}
+			// An underscore inside a word, as snake_case, is no mark.
+			if last == '_' && i > 0 && (unicode.IsLetter(before[i-1]) || unicode.IsDigit(before[i-1])) {
+				continue
+			}
 			open = i
 			break
 		}
@@ -428,6 +448,9 @@ func (v *view) run(cmd string) bool {
 	case "codeBlock":
 		fn = (*Document).ToggleCodeBlock
 	case "link":
+		if v.opts.ReadOnly {
+			return false
+		}
 		if v.opts.OnLinkCommand != nil {
 			v.publish()
 			v.opts.OnLinkCommand()

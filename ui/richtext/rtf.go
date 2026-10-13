@@ -35,6 +35,7 @@ type rtfState struct {
 	field string // "inst" in a field's instruction, "result" in its result
 	link  string // the URL of the field the group is in
 	list  bool   // a paragraph's list text, which says its marker
+	hide  bool   // hidden text, \v
 	uc    int    // how many characters follow a \u as its fallback
 }
 
@@ -73,7 +74,7 @@ func (r *rtfReader) emit(s string) {
 	case st.field == "inst":
 		r.inst += s
 		return
-	case st.skip:
+	case st.skip, st.hide:
 		return
 	}
 	a := st.a
@@ -128,7 +129,7 @@ func (r *rtfReader) read() {
 			if wasInst && r.state.field != "inst" {
 				// The field's group: its result links to the URL of its
 				// instruction.
-				r.state.link = hyperlink(r.inst)
+				r.state.link = safeLink(hyperlink(r.inst))
 				r.inst = ""
 			}
 			r.i++
@@ -153,6 +154,9 @@ func (r *rtfReader) read() {
 				r.i++
 			case c == '~':
 				r.emit(" ")
+				r.i++
+			case c == '_':
+				r.emit("\u2011") // a hyphen lines don't break at
 				r.i++
 			case c == '\n' || c == '\r':
 				// \ and a newline is a \par.
@@ -224,7 +228,8 @@ func (r *rtfReader) control(word string, num int, hasNum bool) {
 		st.skip = false
 	case "fldrslt":
 		st.field = "result"
-	case "listtext":
+	case "listtext", "pntext":
+		// The marker of a list's item, as Word and WordPad write it.
 		st.list = true
 		r.listed = true
 	case "ls":
@@ -244,7 +249,7 @@ func (r *rtfReader) control(word string, num int, hasNum bool) {
 	case "qr":
 		st.para.Align = ui.End
 	case "plain":
-		st.a = Attributes{}
+		st.a, st.hide = Attributes{}, false
 	case "b":
 		if on {
 			st.a.Weight = 700
@@ -259,8 +264,14 @@ func (r *rtfReader) control(word string, num int, hasNum bool) {
 		st.a.Underline = false
 	case "strike", "striked":
 		st.a.Strikethrough = on
-	case "tab":
+	case "tab", "cell":
 		r.emit("\t")
+	case "row":
+		if !st.skip && !st.list && st.field != "inst" {
+			r.endParagraph(true)
+		}
+	case "v":
+		st.hide = on
 	case "emdash":
 		r.emit("—")
 	case "endash":
@@ -325,6 +336,13 @@ func hyperlink(inst string) string {
 		return ""
 	}
 	rest = strings.TrimSpace(rest)
+	// \l "name" links to a bookmark of the document.
+	if after, ok := strings.CutPrefix(rest, "\\l"); ok {
+		if u := hyperlink("HYPERLINK " + strings.TrimSpace(after)); u != "" {
+			return "#" + u
+		}
+		return ""
+	}
 	if strings.HasPrefix(rest, "\"") {
 		if end := strings.Index(rest[1:], "\""); end >= 0 {
 			return rest[1 : end+1]

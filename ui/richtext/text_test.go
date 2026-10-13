@@ -219,8 +219,12 @@ func TestAttributedTextRandom(t *testing.T) {
 			case 2:
 				attrs := testAttrs[rnd.IntN(len(testAttrs))]
 				at = at.Format(a, z, func(x *Attributes) { *x = attrs })
+				if z == n && a < z {
+					z++ // to the end of the text, what typing gets there
+				}
 				for i := a; i < z; i++ {
 					model[i].a = attrs
+					model[i].a.Attachment = nil
 				}
 			case 3:
 				style := testStyles[rnd.IntN(len(testStyles))]

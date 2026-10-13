@@ -324,11 +324,22 @@ func editRole(w *window, role string) bool {
 	}
 	cmd, ok := commands[role]
 	if !ok {
+		// The Format menu's, in the page with the keyboard.
+		cmd, ok = formatCommands[role]
+	}
+	if !ok {
 		return false
 	}
 	params, _ := json.Marshal(map[string]any{"expression": "document.execCommand(" + jsString(cmd) + ")", "userGesture": true})
 	w.withWebView(func() { w.devtools("Runtime.evaluate", string(params), nil) })
 	return true
+}
+
+// formatCommands are the page's commands of the Format menu's roles; in
+// native UI, they go to the content as the other roles.
+var formatCommands = map[string]string{
+	"bold": "bold", "italic": "italic", "underline": "underline", "strikethrough": "strikeThrough",
+	"alignLeft": "justifyLeft", "alignCenter": "justifyCenter", "alignRight": "justifyRight",
 }
 
 func jsString(s string) string {

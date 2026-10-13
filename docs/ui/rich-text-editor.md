@@ -157,8 +157,7 @@ made through the document. `EditorOptions` set:
 
 - `Label` and `Placeholder`;
 - `Font`, the editor's font and size;
-- `ReadOnly`, a text the user selects, copies, and clicks the links and
-  tasks of;
+- `ReadOnly`, a text the user selects, copies, and clicks the links of;
 - `NoMarkdown`, which turns the Markdown shortcuts off;
 - `OnLink`, to open links itself instead of the system;
 - `OnLinkCommand`, to ask for a link's URL on ⌘K, as in a popover;
@@ -177,6 +176,8 @@ macOS:
 | Indent, outdent | ⌘], ⌘[ (Tab and ⇧Tab in a list) | Ctrl+], Ctrl+[ |
 | Align left, center, right | ⌘{, ⌘\|, ⌘} | Ctrl+L, Ctrl+E, Ctrl+R |
 | Heading 1 to 6, body | ⌥⌘1 to ⌥⌘6, ⌥⌘0 | Ctrl+Alt+1 to 6, Ctrl+Alt+0 |
+| Previous, next paragraph | ⌥↑, ⌥↓ | Ctrl+↑, Ctrl+↓ |
+| Start, end of the text | ⌘↑, ⌘↓ | Ctrl+Home, Ctrl+End |
 
 Paragraphs behave as in Notes and Google Docs:
 
@@ -192,7 +193,8 @@ The Markdown shortcuts format what is typed: at the start of a paragraph,
 numbered ones, `[ ] ` and `[x] ` tasks, `> ` a quotation, and ```` ``` ````
 then Enter a block of code. Around words, `**bold**`, `*italic*`,
 `_italic_`, `` `code` `` and `~~strikethrough~~` format what they hold as the
-closing mark is typed. Undo takes a shortcut back to what was typed.
+closing mark is typed; an underscore inside a word, as in `snake_case`,
+stays one. Undo takes a shortcut back to what was typed.
 
 The [Format menu's roles](../menus.md#roles) (`RoleFormatMenu`, or
 `RoleBold`, `RoleAlignCenter`, …) format the editor with the keyboard
