@@ -362,7 +362,7 @@ mygo.App.WhenReady(func() {
 	})
 	panel.OnBlur(panel.Hide)
 
-	mygo.GlobalShortcut.Register("Alt+Space", func() {
+	mygo.GlobalShortcut.Register("Alt+Shift+Space", func() {
 		if panel.IsVisible() {
 			panel.Hide()
 			return
