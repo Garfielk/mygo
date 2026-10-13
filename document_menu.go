@@ -53,7 +53,11 @@ func documentRole(role MenuRole, win *Window) {
 			err = b.revert()
 		}
 		if err != nil && !errors.Is(err, ErrCanceled) {
-			showDocumentError(b.parent(), "The document “"+b.Name()+"” could not be saved.", err)
+			what := map[MenuRole]string{RoleRename: "renamed", RoleMoveTo: "moved", RoleRevert: "reverted"}[role]
+			if what == "" {
+				what = "saved"
+			}
+			showDocumentError(b.parent(), "The document “"+b.Name()+"” could not be "+what+".", err)
 		}
 	}()
 }
