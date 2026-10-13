@@ -36,52 +36,54 @@ func loadIcons() {
 // FileIcon returns the icon the file manager shows for a file or a folder,
 // that of its content type (GIO's standard::icon), or the icon of the
 // application of a desktop entry, from the icon theme at size by size
-// pixels.
+// pixels. Where the theme has no icon of the application, a desktop entry
+// gets that of its content type, as other files do.
 func (shell) FileIcon(path string, size int) ([]byte, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
 	loadIcons()
-	var icon, owner ptr // owner holds icon
 	if strings.HasSuffix(path, ".desktop") {
-		if owner = gDesktopAppInfoNewFromFile(cs(path)); owner != 0 {
-			icon = gAppInfoGetIcon(owner)
+		if app := gDesktopAppInfoNewFromFile(cs(path)); app != 0 {
+			png := themeIcon(gAppInfoGetIcon(app), size)
+			gObjectUnref(app)
+			if png != nil {
+				return png, nil
+			}
 		}
 	}
-	if icon == 0 {
-		if owner != 0 {
-			gObjectUnref(owner)
-		}
-		f := gFileNewForPath(cs(path))
-		var gerr ptr
-		owner = gFileQueryInfo(f, cs("standard::icon"), 0, 0, &gerr)
-		gObjectUnref(f)
-		if owner == 0 {
-			return nil, gErr(gerr)
-		}
-		icon = gFileInfoGetIcon(owner)
+	f := gFileNewForPath(cs(path))
+	var gerr ptr
+	info := gFileQueryInfo(f, cs("standard::icon"), 0, 0, &gerr)
+	gObjectUnref(f)
+	if info == 0 {
+		return nil, gErr(gerr)
 	}
-	defer gObjectUnref(owner)
+	defer gObjectUnref(info)
+	if png := themeIcon(gFileInfoGetIcon(info), size); png != nil {
+		return png, nil
+	}
+	return nil, fmt.Errorf("mygo: the icon theme has no icon for %q", path)
+}
+
+// themeIcon draws a GIcon from the icon theme at size by size pixels, or
+// returns nil where the theme has none of its names.
+func themeIcon(icon ptr, size int) []byte {
 	if icon == 0 {
-		return nil, fmt.Errorf("mygo: no icon for %q", path)
+		return nil
 	}
 	// GIO's themed icons list their generic names themselves, and GTK takes
 	// GTK_ICON_LOOKUP_GENERIC_FALLBACK only with names of its own.
 	const flags = 1 << 4 // GTK_ICON_LOOKUP_FORCE_SIZE
 	info := gtkIconThemeLookupByGicon(gtkIconThemeGetDefault(), icon, int32(size), flags)
 	if info == 0 {
-		return nil, fmt.Errorf("mygo: the icon theme has no icon for %q", path)
+		return nil
 	}
 	defer gObjectUnref(info)
-	var gerr ptr
-	pix := gtkIconInfoLoadIcon(info, &gerr)
+	pix := gtkIconInfoLoadIcon(info, nil)
 	if pix == 0 {
-		return nil, gErr(gerr)
+		return nil
 	}
 	defer gObjectUnref(pix)
-	png := pngFromPixbuf(pix)
-	if png == nil {
-		return nil, fmt.Errorf("mygo: cannot encode the icon of %q", path)
-	}
-	return png, nil
+	return pngFromPixbuf(pix)
 }

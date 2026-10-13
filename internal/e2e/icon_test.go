@@ -29,7 +29,11 @@ func TestFileIcon(t *testing.T) {
 		// A desktop entry's icon is its application's, from the theme.
 		entry := filepath.Join(dir, "editor.desktop")
 		os.WriteFile(entry, []byte("[Desktop Entry]\nType=Application\nName=Editor\nExec=true\nIcon=folder\n"), 0o644)
-		paths = append(paths, entry)
+		// One whose icon the theme lacks, as Byobu's on Ubuntu, gets the
+		// icon of desktop entries.
+		missing := filepath.Join(dir, "unknown.desktop")
+		os.WriteFile(missing, []byte("[Desktop Entry]\nType=Application\nName=Unknown\nExec=true\nIcon=mygo-no-such-icon\n"), 0o644)
+		paths = append(paths, entry, missing)
 	}
 	for _, p := range paths {
 		for _, size := range []int{16, 64} {

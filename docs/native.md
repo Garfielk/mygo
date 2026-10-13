@@ -160,7 +160,8 @@ what it points to, without Finder's arrow. On Windows it is Explorer's
 also name a shell item, such as an app of the Start menu by
 `shell:AppsFolder\<AppUserModelID>`. On Linux it is the icon of the file's
 content type from the icon theme, and for a desktop entry (`.desktop`), the
-icon of its application.
+icon of its application, or where the theme has none, that of desktop
+entries.
 
 ## Displays
 
