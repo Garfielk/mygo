@@ -590,9 +590,24 @@ func (r *richEditor) paintParagraph(ed *editor, pt *Painter, p int, l *text.Layo
 	look := &r.look
 	left, _ := ed.paraInsets(p)
 	if st.CodeBlock {
+		// One block for the paragraphs of code next to each other, rounded
+		// at its ends.
 		radius := look.size * 0.3
-		above, below := ed.paraSpace(p)
-		pt.Fill(Rect{x - left + float32(st.Indent)*look.indent, top + above - min(above, look.size*0.4), width - float32(st.Indent)*look.indent, height - above - below + min(above, look.size*0.4) + min(below, look.size*0.4)}, look.code, radius)
+		box := Rect{x - left + float32(st.Indent)*look.indent, top, width - float32(st.Indent)*look.indent, height}
+		first := p == 0 || !r.para(p-1).style.CodeBlock
+		last := p+1 >= seqLen(r.shown.seq()) || !r.para(p+1).style.CodeBlock
+		fill := box
+		if !first {
+			fill.Y, fill.H = fill.Y-2*radius, fill.H+2*radius
+		}
+		if !last {
+			fill.H += 2 * radius
+		}
+		saved := pt.clip
+		pt.pushClip(box, [4]float32{})
+		pt.Fill(fill, look.code, radius)
+		pt.popClip()
+		pt.clip = saved
 	}
 	if st.Quote {
 		bar := x - left + float32(st.Indent)*look.indent
