@@ -133,7 +133,7 @@ type ListState struct {
 	followBelow float64
 	followWidth float32
 	followSeen  bool
-	laidOut    bool
+	laidOut     bool
 	// wroteY is the offset the list set, to tell it from scrolling.
 	wroteY  float64
 	req     listRequest
