@@ -216,52 +216,34 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 
 const blinkPeriod = 600 * time.Millisecond
 
-// The answer of one read of the clipboard, from answerReads.
-const (
-	readWaiting = iota // not answered; later reads may be
-	readDone           // answered; drop it
-	readBlocked        // a prompt is up: answer nothing yet
-)
-
-// answerReads answers the program's reads of the clipboard, in order, as
-// the frame builds: reads already allowed are served from the clipboard,
-// which only the main thread reads; reads the app is asked about wait
-// for Options.OnClipboardRequest or the terminal's own prompt, one at a
-// time.
+// answerReads answers the program's reads of the clipboard as the frame
+// builds, in order, since an OSC 52 reply doesn't tell which read it
+// answers: reads allowed are served from the clipboard, which only the
+// main thread reads; a read the app is asked about, through
+// Options.OnClipboardRequest or the terminal's own prompt, holds back
+// those after it.
 func (v *view) answerReads(c *ui.Context, term *vt.Terminal) {
-	for i := 0; i < len(v.reads); {
-		r := v.reads[i]
-		switch v.answerRead(c, term, r) {
-		case readDone:
-			v.reads = append(v.reads[:i], v.reads[i+1:]...)
-			if v.clipPrompt == r {
-				v.clipPrompt, v.clipOpen = nil, false
-			}
-		case readWaiting:
-			i++
-		default:
-			return
+	for len(v.reads) > 0 && v.answerRead(c, term, v.reads[0]) {
+		if v.clipPrompt == v.reads[0] {
+			v.clipPrompt, v.clipOpen = nil, false
 		}
-	}
-	if len(v.reads) == 0 {
-		v.clipPrompt, v.clipOpen = nil, false
+		v.reads = slices.Delete(v.reads, 0, 1)
 	}
 }
 
-// answerRead answers one read as far as it can this frame.
-func (v *view) answerRead(c *ui.Context, term *vt.Terminal, r *clipboardRequest) int {
+// answerRead answers r if it can this frame, and reports whether it did.
+func (v *view) answerRead(c *ui.Context, term *vt.Terminal, r *clipboardRequest) bool {
 	t := v.t
 	if a := v.readAnswer(r); a != 0 {
 		v.finishRead(term, r, a == 1)
-		return readDone
+		return true
 	}
-	if !r.asked {
-		if !r.ask {
-			r.asked = true
-			v.finishRead(term, r, true)
-			return readDone
-		}
-		if on := t.opts.OnClipboardRequest; on != nil {
+	if !r.ask {
+		v.finishRead(term, r, true)
+		return true
+	}
+	if on := t.opts.OnClipboardRequest; on != nil {
+		if !r.asked {
 			r.text, r.asked = v.services.ReadClipboard(), true
 			on(ClipboardRequest{
 				Mimes:   slices.Clone(r.mimes),
@@ -272,32 +254,27 @@ func (v *view) answerRead(c *ui.Context, term *vt.Terminal, r *clipboardRequest)
 			})
 			if a := v.readAnswer(r); a != 0 {
 				v.finishRead(term, r, a == 1)
-				return readDone
+				return true
 			}
-			return readWaiting
 		}
-		// The terminal's own prompt asks about the first read that
-		// waits for one, modal across the frames until it is answered.
-		if !v.clipOpen {
-			r.text, r.asked = v.services.ReadClipboard(), true
-			v.clipPrompt, v.clipOpen = r, true
-		}
+		return false
 	}
+	// The terminal's own prompt, modal across the frames until it is
+	// answered.
 	if v.clipPrompt != r {
-		// Another read's prompt is up: this one waits, and with it the
-		// reads after it.
-		return readBlocked
+		r.text = v.services.ReadClipboard()
+		v.clipPrompt, v.clipOpen = r, true
 	}
 	tx := l10n.In(v.lang)
 	switch ui.AlertDialog(c, &v.clipOpen, tx.ClipboardRead(), v.readMessage(r), tx.ClipboardReadDeny(), tx.ClipboardReadAllow()) {
 	case -1:
-		return readBlocked
+		return false
 	case 0, ui.AlertDismissed:
 		v.finishRead(term, r, false)
 	default:
 		v.finishRead(term, r, true)
 	}
-	return readDone
+	return true
 }
 
 // readAnswer returns 1 when the app allowed the read, 2 when it denied
@@ -316,7 +293,7 @@ func (v *view) finishRead(term *vt.Terminal, r *clipboardRequest, allow bool) {
 		return
 	}
 	if !allow {
-		term.AnswerClipboard(r.deferred, false, nil, nil)
+		v.answer(term, r, false, nil, nil)
 		return
 	}
 	formats := []transfer.Format{transfer.Text}
@@ -345,7 +322,20 @@ func (v *view) finishRead(term *vt.Terminal, r *clipboardRequest, allow bool) {
 			available = append(available, m)
 		}
 	}
-	term.AnswerClipboard(r.deferred, true, contents, available)
+	v.answer(term, r, true, contents, available)
+}
+
+// answer writes the answer of a read under t.mu, as the reader goroutine
+// writes what the program's output answers, so that the answer doesn't
+// come between a paste's reply and the flag that says it is one
+// (Terminal.replying). A terminal closed since says nothing.
+func (v *view) answer(term *vt.Terminal, r *clipboardRequest, allow bool, contents map[string][]byte, available []string) {
+	t := v.t
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.term == term && !t.closed {
+		term.AnswerClipboard(r.deferred, allow, contents, available)
+	}
 }
 
 // readMessage is what the terminal's prompt says a read asks for: the

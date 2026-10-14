@@ -164,8 +164,7 @@ type clipboardRequest struct {
 	ask      bool // the app is asked before it is answered
 	text     string
 	// answer is 0 until Allow (1) or Deny (2), the first of which wins;
-	// asked tells that a frame asked the app or took it to answer
-	// without asking.
+	// asked tells that Options.OnClipboardRequest was called with it.
 	answer int8
 	asked  bool
 }
@@ -191,7 +190,7 @@ func (t *Terminal) clipboardRead(req vt.ClipboardRead) (vt.ClipboardReply, vt.Cl
 			reply.Available = slices.Clone(o.mimes)
 		}
 		// The reply, encoded, comes to WritePTY as this returns.
-		t.replying.Store(len(reply.Contents) > 0)
+		t.replying = len(reply.Contents) > 0
 		return reply, vt.ClipboardAnswered
 	}
 	if req.CanRemember {

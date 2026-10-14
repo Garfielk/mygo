@@ -346,11 +346,10 @@ type Terminal struct {
 	// offer is what the last paste offered a program that reads the
 	// clipboard itself (mode 5522), until it reads it; replying tells
 	// that what WritePTY gets next is the reply to its read, which it
-	// sends in pieces that report their progress. A reply may come from
-	// the main thread too, as the answer to a read (AnswerClipboard), so
-	// it is atomic.
+	// sends in pieces that report their progress. The answers of reads
+	// the main thread writes hold t.mu too (view.finishRead).
 	offer    *pasteOffer
-	replying atomic.Bool
+	replying bool
 	// binds are the keys bound to actions; fontSize is the size zooms
 	// set, 0 for the font's.
 	binds    []Keybind
@@ -412,10 +411,11 @@ func New(opts Options) (*Terminal, error) {
 	var err error
 	t.term, err = vt.NewTerminal(80, 24, vt.Effects{
 		WritePTY: func(p []byte) {
-			if !t.replying.Swap(false) {
+			if !t.replying {
 				t.in.push(append([]byte(nil), p...))
 				return
 			}
+			t.replying = false
 			t.sendReply(p)
 		},
 		Bell:         func() { t.events.bells++ },

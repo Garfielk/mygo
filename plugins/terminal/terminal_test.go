@@ -1617,6 +1617,45 @@ func TestClipboardReadAsk(t *testing.T) {
 	}
 }
 
+// TestClipboardReadOrder: reads are answered in the order they came, since
+// an OSC 52 reply doesn't tell which read it answers: one the app is asked
+// about holds back those after it.
+func TestClipboardReadOrder(t *testing.T) {
+	loadLib(t)
+	conn := newPipe()
+	var requests []ClipboardRequest
+	term, err := New(Options{
+		Conn:               conn,
+		ClipboardRead:      ClipboardAsk,
+		OnClipboardRequest: func(req ClipboardRequest) { requests = append(requests, req) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	tt.SetClipboard("hello")
+	term.Feed([]byte("\x1b]52;c;?\x1b\\\x1b]52;p;?\x1b\\"))
+	tt.Frame()
+	if len(requests) != 1 || requests[0].Primary {
+		t.Fatalf("asked %+v before the first read was answered", requests)
+	}
+	requests[0].Deny()
+	tt.Frame()
+	if got := conn.take(1); got != "\x1b]52;c;\x1b\\" {
+		t.Errorf("the first read was answered %q", got)
+	}
+	if len(requests) != 2 || !requests[1].Primary {
+		t.Fatalf("the second read was not asked about: %+v", requests)
+	}
+	requests[1].Allow()
+	tt.Frame()
+	want := "\x1b]52;p;aGVsbG8=\x1b\\"
+	if got := conn.take(len(want)); got != want {
+		t.Errorf("the second read was answered %q, want %q", got, want)
+	}
+}
+
 // TestClipboardReadPrompt: without OnClipboardRequest the terminal asks
 // with its own prompt, whose default button (Enter) allows and whose
 // Escape denies, keeping the read pending across frames until then.
