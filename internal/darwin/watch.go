@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -59,11 +58,9 @@ const (
 	// under the core's 50 ms Debounce, so the core's trailing debounce
 	// does the coalescing an app sees and the stream only batches bursts.
 	fseLatency = 0.01
-	// fseQueueSize is how many notices a watch buffers before it asks the
+	// fseQueueSize is how many notices a watch holds before it asks the
 	// core to look at everything again.
 	fseQueueSize = 4096
-	// fseBatch is how many notices Wait returns at a time.
-	fseBatch = 128
 	// fseUTF8 is kCFStringEncodingUTF8.
 	fseUTF8 = 0x08000100
 	// fseFramework is where the FSEvents C API lives.
@@ -85,6 +82,12 @@ var (
 
 	watchQueueCreate func(label *byte, attr uintptr) uintptr
 	dispatchSyncF    func(queue, context, work uintptr)
+	libcRealpath     func(path, resolved *byte) uintptr
+
+	// fseCallback is the process's one FSEventStreamCallback, and fseFlush
+	// what dispatch_sync_f runs to wait for the callbacks already queued:
+	// created with the first watch and never freed.
+	fseCallback, fseFlush uintptr
 
 	// fseQueue is the one serial queue every stream delivers on, off the
 	// main thread, so stopping a stream can wait for a callback already
@@ -116,6 +119,15 @@ func loadFSEvents() {
 		kCFTypeArrayCallBacks = mustDlsym(libCF, "kCFTypeArrayCallBacks")
 		purego.RegisterLibFunc(&watchQueueCreate, purego.RTLD_DEFAULT, "dispatch_queue_create")
 		purego.RegisterLibFunc(&dispatchSyncF, purego.RTLD_DEFAULT, "dispatch_sync_f")
+		// The UNIX03 realpath on Intel; Apple silicon has only one.
+		realpath := "realpath$DARWIN_EXTSN"
+		if _, err := purego.Dlsym(purego.RTLD_DEFAULT, realpath); err != nil {
+			realpath = "realpath"
+		}
+		purego.RegisterLibFunc(&libcRealpath, purego.RTLD_DEFAULT, realpath)
+		fseCallback = purego.NewCallback(fseEvents)
+		// Our callback never blocks, so waiting for it cannot deadlock.
+		fseFlush = purego.NewCallback(func() {})
 		label := []byte("mygo.watch\x00")
 		fseQueue = watchQueueCreate(&label[0], 0)
 	})
@@ -149,10 +161,9 @@ var fseStreams = struct {
 	m map[uintptr]*fseStream
 }{m: map[uintptr]*fseStream{}}
 
-// fseCallback is the process's one FSEventStreamCallback, created at
-// startup and never freed. Without kFSEventStreamCreateFlagUseCFTypes the
-// paths are a C array of C strings.
-var fseCallback = purego.NewCallback(func(stream, info, numEvents, paths, flags, ids uintptr) uintptr {
+// fseEvents is the FSEventStreamCallback. Without
+// kFSEventStreamCreateFlagUseCFTypes the paths are a C array of C strings.
+func fseEvents(stream, info, numEvents, paths, flags, ids uintptr) uintptr {
 	if info == 0 {
 		return 0
 	}
@@ -176,11 +187,7 @@ var fseCallback = purego.NewCallback(func(stream, info, numEvents, paths, flags,
 		}
 	}
 	return 0
-})
-
-// fseFlush is what dispatch_sync_f runs to wait for the callbacks already
-// queued: our callback never blocks, so this cannot deadlock.
-var fseFlush = purego.NewCallback(func() {})
+}
 
 // ptrOf returns the pointer at the native address p.
 func ptrOf(p uintptr) unsafe.Pointer { return *(*unsafe.Pointer)(unsafe.Pointer(&p)) }
@@ -208,17 +215,18 @@ func (s *fseStream) event(path string, flags uint32) (platform.FileWatchNotice, 
 		}
 		rel = ""
 	}
-	if rel != "" && !s.subtree {
-		// FSEvents is recursive, but the core rejects a name with a slash
-		// for a target without Subtree: name the direct child, whose stat
-		// is what a non-recursive watch is about.
-		rel, _, _ = strings.Cut(rel, "/")
+	if flags&(fseMustScanSubDirs|fseUserDropped|fseKernelDropped|fseEventIdsWrapped) != 0 {
+		// Changes were dropped: the core lists everything again.
+		return platform.FileWatchNotice{Target: s.id, Err: platform.ErrFileWatchOverflow}, true
+	}
+	if !s.subtree && strings.Contains(rel, "/") {
+		// FSEvents is recursive, but a target without Subtree is about its
+		// directory and the entries in it, which a change deeper down
+		// doesn't change: a directory's own changes are not reported.
+		return platform.FileWatchNotice{}, false
 	}
 	n := platform.FileWatchNotice{Target: s.id, Name: rel}
 	switch {
-	case flags&(fseMustScanSubDirs|fseUserDropped|fseKernelDropped|fseEventIdsWrapped) != 0:
-		// Changes were dropped: the core lists everything again.
-		return platform.FileWatchNotice{Target: s.id, Err: platform.ErrFileWatchOverflow}, true
 	case flags&fseHistoryDone != 0:
 		return platform.FileWatchNotice{}, false
 	case flags&fseRootChanged != 0:
@@ -245,11 +253,15 @@ func (s *fseStream) event(path string, flags uint32) (platform.FileWatchNotice, 
 // look at everything again. It never blocks: it runs on the dispatch queue,
 // which a stream's teardown waits on.
 func (s *fseStream) deliver(n platform.FileWatchNotice) {
-	select {
-	case s.driver.notices <- n:
-	default:
-		s.driver.overflow.Store(true)
+	d := s.driver
+	d.mu.Lock()
+	if len(d.notices) < fseQueueSize {
+		d.notices = append(d.notices, n)
+	} else {
+		d.overflow = true
 	}
+	d.mu.Unlock()
+	d.Wake()
 }
 
 // stop stops and releases the stream. Only the goroutine of the watch calls
@@ -275,13 +287,14 @@ func (s *fseStream) stop() {
 // fseWatch is the FSEvents implementation of watchdriver.Driver: one stream
 // per directory target, all delivering on fseQueue.
 type fseWatch struct {
-	// notices is filled by the callback, on the dispatch queue, and read
-	// by Wait on the goroutine of the watch.
-	notices chan platform.FileWatchNotice
+	// notices are filled by the callback, on the dispatch queue, and taken
+	// by Wait on the goroutine of the watch; overflow says there were too
+	// many, so the core must look at everything.
+	mu       sync.Mutex
+	notices  []platform.FileWatchNotice
+	overflow bool
 	// wake interrupts Wait, buffered so Wake never waits.
 	wake chan struct{}
-	// overflow says notices was full, so the core must look at everything.
-	overflow atomic.Bool
 	// streams are the running streams by target ID; only the goroutine of
 	// the watch (Add, Remove, Close) uses it.
 	streams map[uint64]*fseStream
@@ -292,12 +305,24 @@ func (*Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.Fi
 	if fseQueue == 0 {
 		return nil, errors.New("cannot create the watch dispatch queue")
 	}
-	d := &fseWatch{
-		notices: make(chan platform.FileWatchNotice, fseQueueSize),
-		wake:    make(chan struct{}, 1),
-		streams: map[uint64]*fseStream{},
-	}
+	d := &fseWatch{wake: make(chan struct{}, 1), streams: map[uint64]*fseStream{}}
 	return watchdriver.New(d, notify), nil
+}
+
+// canonicalPath resolves path with realpath, which gives the names as they
+// are on disk, or returns it as it is when it can't.
+func canonicalPath(path string) string {
+	in := append([]byte(path), 0)
+	var out [1024]byte // PATH_MAX
+	if libcRealpath(&in[0], &out[0]) == 0 {
+		return path
+	}
+	for i, c := range out {
+		if c == 0 {
+			return string(out[:i])
+		}
+	}
+	return path
 }
 
 // covered reports whether a whole tree above path is already watched: a
@@ -323,22 +348,25 @@ func (d *fseWatch) Add(t platform.FileWatchTarget) error {
 		// and FSEvents watches trees, not single files.
 		return nil
 	}
-	if d.covered(t.Path) {
+	// FSEvents reports paths as they are on disk, which a path given on a
+	// case-insensitive volume may not be.
+	streamPath := canonicalPath(t.Path)
+	if d.covered(streamPath) {
 		// A stream above t already watches its whole tree: FSEvents is
 		// recursive, so a target beneath it needs no stream of its own.
-		// The core enrolls children of a directory it doesn't watch
-		// recursively, and below their stream's path events still arrive,
-		// named by the direct child of the target that has it.
+		// The core enrolls the directories in a directory it doesn't
+		// watch recursively, which the stream above names, without what
+		// changes in them, which the core doesn't report.
 		return nil
 	}
-	info, err := os.Lstat(t.Path)
+	info, err := os.Lstat(streamPath)
 	if err != nil {
 		return err
 	}
 	if !os.SameFile(info, t.Info) {
 		return errors.New("watch target identity changed")
 	}
-	path := append([]byte(t.Path), 0)
+	path := append([]byte(streamPath), 0)
 	cfPath := cfStringCreateWithCString(0, &path[0], fseUTF8)
 	runtime.KeepAlive(path)
 	if cfPath == 0 {
@@ -351,7 +379,7 @@ func (d *fseWatch) Add(t platform.FileWatchTarget) error {
 		cfRelease(cfPath)
 		return errors.New("cannot make the watch paths a CFArray")
 	}
-	s := &fseStream{id: t.ID, path: t.Path, subtree: t.Subtree, driver: d}
+	s := &fseStream{id: t.ID, path: streamPath, subtree: t.Subtree, driver: d}
 	s.context.info = uintptr(unsafe.Pointer(s))
 	// kFSEventStreamEventIdSinceNow: the core's snapshot is taken already.
 	stream := fseStreamCreate(0, fseCallback, &s.context, cfPaths, ^uint64(0), fseLatency, fseFileEvents|fseWatchRoot)
@@ -382,33 +410,20 @@ func (d *fseWatch) Remove(id uint64) {
 }
 
 // Wait returns the notices that came in, or, after an overflow, one notice
-// that makes the core look at everything again. Wake makes it return with
-// none, so that the command Wake announced is taken. Channels are never
-// closed: Watch wakes the driver before it closes it, and a callback may
-// still be delivering.
+// that makes the core look at everything again. Wake makes it return, so
+// that the command Wake announced is taken.
 func (d *fseWatch) Wait() ([]platform.FileWatchNotice, error) {
-	if d.overflow.Swap(false) {
-		// The queued notices are covered by the core's full scan.
-		for len(d.notices) > 0 {
-			<-d.notices
-		}
+	<-d.wake
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	notices := d.notices
+	d.notices = nil
+	if d.overflow {
+		// The notices held are covered by the core's full scan.
+		d.overflow = false
 		return []platform.FileWatchNotice{{Err: platform.ErrFileWatchOverflow}}, nil
 	}
-	select {
-	case n := <-d.notices:
-		notices := []platform.FileWatchNotice{n}
-		for len(notices) < fseBatch {
-			select {
-			case n := <-d.notices:
-				notices = append(notices, n)
-			default:
-				return notices, nil
-			}
-		}
-		return notices, nil
-	case <-d.wake:
-		return nil, nil
-	}
+	return notices, nil
 }
 
 func (d *fseWatch) Wake() {

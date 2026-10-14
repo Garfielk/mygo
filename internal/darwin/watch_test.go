@@ -31,7 +31,8 @@ func TestFSEventsEventMapping(t *testing.T) {
 		{"root", sub, "/w", fseItemModified | fseItemIsFile, "", platform.FileWatchWrite, nil, true},
 		{"child", sub, "/w/child", fseItemModified | fseItemIsFile, "child", platform.FileWatchWrite, nil, true},
 		{"subtree deep", sub, "/w/a/b", fseItemCreated, "a/b", platform.FileWatchDirty, nil, true},
-		{"plain deep", plain, "/w/a/b", fseItemCreated, "a", platform.FileWatchDirty, nil, true},
+		{"plain deep", plain, "/w/a/b", fseItemCreated, "", 0, nil, false},
+		{"plain deep dropped", plain, "/w/a/b", fseKernelDropped | fseMustScanSubDirs, "", 0, platform.ErrFileWatchOverflow, true},
 		{"created", sub, "/w/a", fseItemCreated, "a", platform.FileWatchDirty, nil, true},
 		{"removed", sub, "/w/a", fseItemRemoved, "a", platform.FileWatchDirty, nil, true},
 		{"renamed", sub, "/w/a", fseItemRenamed, "a", platform.FileWatchDirty, nil, true},
@@ -149,7 +150,7 @@ func TestFSEventsWatch(t *testing.T) {
 	// not refused.
 	watchTestAdd(t, w, 1, dir, true)
 	// A target without Subtree watches the directory and its direct
-	// children, and names events deeper down by the direct child.
+	// children, and drops events deeper down.
 	other := watchTestDir(t)
 	otherFile := filepath.Join(other, "file")
 	watchTestWrite(t, otherFile, "one")
@@ -162,8 +163,7 @@ func TestFSEventsWatch(t *testing.T) {
 
 	// A directory beneath a watched tree needs no stream of its own: the
 	// core enrolls children of a directory it doesn't watch recursively,
-	// and their events arrive through the stream above them. (The mkdir
-	// is waited for first, so the notice below is the write's.)
+	// which the stream above names, and what changes in them is dropped.
 	child := filepath.Join(other, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
@@ -171,7 +171,21 @@ func TestFSEventsWatch(t *testing.T) {
 	watchTestNext(t, notices, 2, platform.FileWatchDirty, "child")
 	watchTestAdd(t, w, 3, child, false)
 	watchTestWrite(t, filepath.Join(child, "inside"), "one")
-	watchTestNextKinds(t, notices, 2, watchTestWritten, "child")
+	watchTestWrite(t, otherFile, "after inside")
+	for timeout := time.After(10 * time.Second); ; {
+		var n platform.FileWatchNotice
+		select {
+		case n = <-notices:
+		case <-timeout:
+			t.Fatal("no notice for file")
+		}
+		if n.Target == 2 && n.Name == "child" {
+			t.Fatalf("change inside a child reported: %+v", n)
+		}
+		if n.Target == 2 && n.Name == "file" {
+			break
+		}
+	}
 
 	if err := os.WriteFile(filepath.Join(sub, "new"), nil, 0600); err != nil {
 		t.Fatal(err)
@@ -262,4 +276,21 @@ func TestFSEventsWatchManyFiles(t *testing.T) {
 	watchTestAdd(t, w, 1, dir, true)
 	watchTestWrite(t, filepath.Join(dir, "file-00042"), "written")
 	watchTestNextKinds(t, notices, 1, watchTestWritten, "file-00042")
+}
+
+// A path given in another case than the disk's, on a case-insensitive
+// volume, is watched as the disk names it, which is how FSEvents reports it.
+func TestFSEventsWatchCase(t *testing.T) {
+	dir := watchTestDir(t)
+	if err := os.Mkdir(filepath.Join(dir, "Proj"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	lower := filepath.Join(dir, "proj")
+	if _, err := os.Lstat(lower); err != nil {
+		t.Skip("the volume is case-sensitive")
+	}
+	w, notices := watchTest(t)
+	watchTestAdd(t, w, 1, lower, true)
+	watchTestWrite(t, filepath.Join(dir, "Proj", "file"), "one")
+	watchTestNextKinds(t, notices, 1, append(watchTestWritten, platform.FileWatchDirty), "file")
 }

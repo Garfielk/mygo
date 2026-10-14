@@ -1653,7 +1653,9 @@ main thread, so watches work before the app runs and don't wait on it.
   itself (`kFSEventStreamCreateFlagWatchRoot`), delivering through one
   callback created at startup, on one serial dispatch queue of the
   process, never the main thread. `Subtree` targets report paths at any
-  depth; one without it names the direct child of a deeper change. The
+  depth; one without it drops what changes deeper than its entries. The
+  stream's path is resolved with `realpath`, as FSEvents names what is
+  on disk, which a path given on a case-insensitive volume may not. The
   notices are hints: `MustScanSubDirs` or a full queue makes the core look
   at everything again, as an overflow does elsewhere, and the stream's
   10 ms latency is under the core's debounce, which does the coalescing an
