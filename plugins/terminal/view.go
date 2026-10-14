@@ -3,7 +3,9 @@ package terminal
 import (
 	"math"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -124,6 +126,13 @@ type view struct {
 	scrolled   float32 // scrolling not yet a whole row
 	zoomed     float32 // wheel with the zoom modifier not yet a notch
 	ticking    bool    // an autoscroll tick is due
+
+	// reads are the program's reads of the clipboard waiting to be
+	// answered; clipPrompt is the one the terminal's own prompt asks
+	// about while clipOpen, one at a time.
+	reads      []*clipboardRequest
+	clipPrompt *clipboardRequest
+	clipOpen   bool
 }
 
 type pendingKey struct {
@@ -152,6 +161,7 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 	v.theme = theme
 	if t.term == nil {
 		v.release()
+		v.reads, v.clipPrompt, v.clipOpen = nil, nil, false
 	} else {
 		if v.applied != theme {
 			theme.apply(t.term)
@@ -175,9 +185,16 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 	}
 	copied := t.clipOut
 	t.clipOut = nil
+	reads := t.clipReads
+	t.clipReads = nil
+	term := t.term
 	t.mu.Unlock()
 	for _, s := range copied {
 		c.WriteClipboard(s)
+	}
+	if term != nil {
+		v.reads = append(v.reads, reads...)
+		v.answerReads(c, term)
 	}
 	if focused != v.focused {
 		v.focused = focused
@@ -198,6 +215,166 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 }
 
 const blinkPeriod = 600 * time.Millisecond
+
+// The answer of one read of the clipboard, from answerReads.
+const (
+	readWaiting = iota // not answered; later reads may be
+	readDone           // answered; drop it
+	readBlocked        // a prompt is up: answer nothing yet
+)
+
+// answerReads answers the program's reads of the clipboard, in order, as
+// the frame builds: reads already allowed are served from the clipboard,
+// which only the main thread reads; reads the app is asked about wait
+// for Options.OnClipboardRequest or the terminal's own prompt, one at a
+// time.
+func (v *view) answerReads(c *ui.Context, term *vt.Terminal) {
+	for i := 0; i < len(v.reads); {
+		r := v.reads[i]
+		switch v.answerRead(c, term, r) {
+		case readDone:
+			v.reads = append(v.reads[:i], v.reads[i+1:]...)
+			if v.clipPrompt == r {
+				v.clipPrompt, v.clipOpen = nil, false
+			}
+		case readWaiting:
+			i++
+		default:
+			return
+		}
+	}
+	if len(v.reads) == 0 {
+		v.clipPrompt, v.clipOpen = nil, false
+	}
+}
+
+// answerRead answers one read as far as it can this frame.
+func (v *view) answerRead(c *ui.Context, term *vt.Terminal, r *clipboardRequest) int {
+	t := v.t
+	if a := v.readAnswer(r); a != 0 {
+		v.finishRead(term, r, a == 1)
+		return readDone
+	}
+	if !r.asked {
+		if !r.ask {
+			r.asked = true
+			v.finishRead(term, r, true)
+			return readDone
+		}
+		if on := t.opts.OnClipboardRequest; on != nil {
+			r.text, r.asked = v.services.ReadClipboard(), true
+			on(ClipboardRequest{
+				Mimes:   slices.Clone(r.mimes),
+				List:    r.list,
+				Primary: r.primary,
+				Text:    r.text,
+				req:     r,
+			})
+			if a := v.readAnswer(r); a != 0 {
+				v.finishRead(term, r, a == 1)
+				return readDone
+			}
+			return readWaiting
+		}
+		// The terminal's own prompt asks about the first read that
+		// waits for one, modal across the frames until it is answered.
+		if !v.clipOpen {
+			r.text, r.asked = v.services.ReadClipboard(), true
+			v.clipPrompt, v.clipOpen = r, true
+		}
+	}
+	if v.clipPrompt != r {
+		// Another read's prompt is up: this one waits, and with it the
+		// reads after it.
+		return readBlocked
+	}
+	tx := l10n.In(v.lang)
+	switch ui.AlertDialog(c, &v.clipOpen, tx.ClipboardRead(), v.readMessage(r), tx.ClipboardReadDeny(), tx.ClipboardReadAllow()) {
+	case -1:
+		return readBlocked
+	case 0, ui.AlertDismissed:
+		v.finishRead(term, r, false)
+	default:
+		v.finishRead(term, r, true)
+	}
+	return readDone
+}
+
+// readAnswer returns 1 when the app allowed the read, 2 when it denied
+// it, and 0 while the read waits; Allow and Deny may run on any
+// goroutine, so t.mu guards it.
+func (v *view) readAnswer(r *clipboardRequest) int8 {
+	v.t.mu.Lock()
+	defer v.t.mu.Unlock()
+	return r.answer
+}
+
+// finishRead answers a read with what the clipboard holds of what the
+// program asked for, read here on the main thread, or with its refusal.
+func (v *view) finishRead(term *vt.Terminal, r *clipboardRequest, allow bool) {
+	if term == nil {
+		return
+	}
+	if !allow {
+		term.AnswerClipboard(r.deferred, false, nil, nil)
+		return
+	}
+	formats := []transfer.Format{transfer.Text}
+	for _, mime := range r.mimes {
+		if f := transfer.Format(mime); !slices.Contains(formats, f) {
+			formats = append(formats, f)
+		}
+	}
+	d := v.services.ReadClipboardData(formats...)
+	contents := make(map[string][]byte, len(r.mimes)+1)
+	for _, mime := range r.mimes {
+		if b := readFormat(d, mime); len(b) > 0 {
+			contents[mime] = b
+		}
+	}
+	// The text too, whatever was asked for: an OSC 52 read asks for
+	// text/plain alone, and the binding serves the protocol it came by.
+	if b := readFormat(d, string(transfer.Text)); len(b) > 0 {
+		if _, ok := contents["text/plain"]; !ok {
+			contents["text/plain"] = b
+		}
+	}
+	var available []string
+	for _, f := range v.services.ClipboardFormats() {
+		if m := offerMIME(f); m != "" && !slices.Contains(available, m) {
+			available = append(available, m)
+		}
+	}
+	term.AnswerClipboard(r.deferred, true, contents, available)
+}
+
+// readMessage is what the terminal's prompt says a read asks for: the
+// text it would read as one line, the types it asked for when the
+// clipboard holds no text, or that the clipboard is empty.
+func (v *view) readMessage(r *clipboardRequest) string {
+	if r.text != "" {
+		return previewText(r.text)
+	}
+	if len(r.mimes) > 0 {
+		return strings.Join(r.mimes, " ")
+	}
+	return l10n.In(v.lang).ClipboardReadEmpty()
+}
+
+// previewText is text as one line of at most 200 runes.
+func previewText(text string) string {
+	one := strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return ' '
+		}
+		return r
+	}, text)
+	if r := []rune(one); len(r) > 200 {
+		return string(r[:200]) + "…"
+	}
+	return one
+}
 
 // release frees what the view made of the library, once the terminal is
 // closed.
