@@ -92,10 +92,15 @@ type FileWatcher struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	// native is the backend's watch, which only the goroutine of the
-	// watch uses; what it reports goes through raw, and overflow says raw
-	// was full.
+	// watch uses; what it reports goes through raw. What comes while raw
+	// is full, as during a burst while the watch looks, waits in spill
+	// (spilled tells), up to MaxEntries notices; past that, overflow says
+	// some were dropped.
 	native   platform.FileWatch
 	raw      chan platform.FileWatchNotice
+	spillMu  sync.Mutex
+	spill    []platform.FileWatchNotice
+	spilled  chan struct{}
 	overflow chan struct{}
 	root     string
 	opts     FileWatchOptions
@@ -159,7 +164,7 @@ func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileW
 		return nil, err
 	}
 	life, cancel := context.WithCancel(ctx)
-	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, taken: make(chan struct{}, 1), done: make(chan struct{}), raw: make(chan platform.FileWatchNotice, 4096), overflow: make(chan struct{}, 1)}
+	w := &FileWatcher{ctx: life, cancel: cancel, root: root, opts: opts, taken: make(chan struct{}, 1), done: make(chan struct{}), raw: make(chan platform.FileWatchNotice, 4096), spilled: make(chan struct{}, 1), overflow: make(chan struct{}, 1)}
 	fileWatches.Lock()
 	if fileWatches.stopped {
 		fileWatches.Unlock()
@@ -184,7 +189,9 @@ func WatchFiles(ctx context.Context, path string, opts FileWatchOptions) (*FileW
 }
 
 // notice is what the backend reports to, on its goroutine. When raw is
-// full the watch looks at everything again instead.
+// full the notice is spilled, and when the spill is full too the watch
+// looks at everything again instead, as after any overflow: either way no
+// change goes unseen.
 func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	select {
 	case <-w.ctx.Done():
@@ -201,12 +208,32 @@ func (w *FileWatcher) notice(n platform.FileWatchNotice) {
 	}
 	select {
 	case w.raw <- n:
+		return
 	default:
-		select {
-		case w.overflow <- struct{}{}:
-		default:
-		}
 	}
+	w.spillMu.Lock()
+	signal := w.spilled
+	if len(w.spill) < w.opts.MaxEntries {
+		w.spill = append(w.spill, n)
+	} else {
+		// More than a look at everything would cost to follow.
+		w.spill = nil
+		signal = w.overflow
+	}
+	w.spillMu.Unlock()
+	select {
+	case signal <- struct{}{}:
+	default:
+	}
+}
+
+// unspill takes the notices spilled.
+func (w *FileWatcher) unspill() []platform.FileWatchNotice {
+	w.spillMu.Lock()
+	defer w.spillMu.Unlock()
+	spill := w.spill
+	w.spill = nil
+	return spill
 }
 
 // Root returns the path the watch watches, absolute and with its symlinks
@@ -435,6 +462,16 @@ func (w *FileWatcher) run(ready chan error) {
 		case <-w.overflow:
 			scan.all = true
 			schedule()
+		case <-w.spilled:
+			for _, n := range w.unspill() {
+				if err := scan.mark(n); err != nil {
+					terminal = err
+					return
+				}
+			}
+			if scan.pending() {
+				schedule()
+			}
 		case n := <-w.raw:
 			if err := scan.mark(n); err != nil {
 				terminal = err

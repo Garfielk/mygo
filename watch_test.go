@@ -1006,6 +1006,44 @@ func TestFileWatchNoFiles(t *testing.T) {
 	}
 }
 
+// What the backend reports while the watch's channel is full waits for it
+// rather than making it look at everything; only more than MaxEntries
+// notices do.
+func TestFileWatchSpill(t *testing.T) {
+	w := &FileWatcher{ctx: context.Background(), opts: FileWatchOptions{MaxEntries: 3}, raw: make(chan platform.FileWatchNotice, 1), spilled: make(chan struct{}, 1), overflow: make(chan struct{}, 1)}
+	for i := range 4 {
+		w.notice(platform.FileWatchNotice{Target: uint64(i)})
+	}
+	if n := <-w.raw; n.Target != 0 {
+		t.Fatalf("raw = %+v", n)
+	}
+	select {
+	case <-w.spilled:
+	default:
+		t.Fatal("spill not signaled")
+	}
+	select {
+	case <-w.overflow:
+		t.Fatal("overflow within MaxEntries")
+	default:
+	}
+	if spill := w.unspill(); len(spill) != 3 || spill[0].Target != 1 || spill[2].Target != 3 {
+		t.Fatalf("spill = %+v", spill)
+	}
+	w.raw <- platform.FileWatchNotice{}
+	for i := range 4 {
+		w.notice(platform.FileWatchNotice{Target: uint64(10 + i)})
+	}
+	select {
+	case <-w.overflow:
+	default:
+		t.Fatal("no overflow past MaxEntries")
+	}
+	if spill := w.unspill(); spill != nil {
+		t.Fatalf("spill kept past an overflow: %+v", spill)
+	}
+}
+
 // Changes of permissions alone are not writes.
 func TestFileWatchMetadata(t *testing.T) {
 	dir := t.TempDir()
