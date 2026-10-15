@@ -360,3 +360,65 @@ func Fragment(dst vec4, pos vec2) vec4 {
 	mustPanic("too many", "5 numbers", func() { v.Floats(right, 1, 2, 3, 4, 5) })
 	mustPanic("other shader", "not a uniform variable of the values' shader", func() { v.Float(other.Uniform("Split"), 1) })
 }
+
+// A shader reads what the window drew behind it, blurred as asked, from
+// Draw and from an element's effect.
+func TestBackdrop(t *testing.T) {
+	invert := shader.MustCompile(`package main
+
+func Fragment(dst vec4, pos vec2) vec4 {
+	b := backdropAt(pos)
+	return vec4(b.a-b.rgb, b.a)
+}
+`)
+	tint := shader.MustCompile(`package main
+
+func ColorEffect(pos vec2, color vec4) vec4 {
+	b := backdropSample(pos)
+	return mix(b, color, color.a*0.5)
+}
+`)
+	view := func(c *ui.Context) {
+		ui.Column(c).Fill().Children(func() {
+			ui.Row(c).Height(50).Children(func() {
+				ui.Box(c).Width(50).FillHeight().Background(ui.RGB(255, 0, 0))
+				ui.Box(c).Width(50).FillHeight().Background(ui.RGB(0, 0, 255)).Draw(func(p *ui.Painter, r ui.Rect) {
+					// Over the red to the left too.
+					invert.Draw(p, ui.Rect{X: r.X - 25, Y: r.Y + 10, W: 50, H: 30}, shader.Options{})
+				})
+			})
+			ui.Box(c).Height(50).Background(ui.RGB(0, 255, 0)).Children(func() {
+				ui.Box(c).Width(40).Height(40).Background(ui.RGB(255, 255, 255)).Effect(tint.Effect(shader.Options{BackdropBlur: 2}))
+			})
+		})
+	}
+	img := ui.NewTester(view, 100, 100).Image()
+	at := func(x, y int) [4]uint8 {
+		o := img.PixOffset(x, y)
+		return [4]uint8(img.Pix[o : o+4])
+	}
+	if got := at(35, 25); got != [4]uint8{0, 255, 255, 255} {
+		t.Errorf("the inverted red: %v, want cyan", got)
+	}
+	if got := at(65, 25); got != [4]uint8{255, 255, 0, 255} {
+		t.Errorf("the inverted blue: %v, want yellow", got)
+	}
+	if got := at(10, 25); got != [4]uint8{255, 0, 0, 255} {
+		t.Errorf("beside the shader: %v, want red", got)
+	}
+	// White over green, half and half: light green.
+	if got := at(20, 70); got[0] < 100 || got[0] > 160 || got[1] != 255 || got[2] < 100 || got[2] > 160 {
+		t.Errorf("the effect over the green: %v, want white mixed half into green", got)
+	}
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "not shapes") {
+			t.Errorf("Fill of a shader reading its backdrop: %v, want a panic", r)
+		}
+	}()
+	ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+			var path ui.Path
+			invert.FillPath(p, path.Circle(5, 5, 4), shader.Options{})
+		})
+	}, 10, 10).Image()
+}

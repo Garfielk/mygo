@@ -318,6 +318,12 @@ func (r *Renderer) bindShader(b gpu.Batch) {
 	var flip [4]int32
 	for i, t := range b.Textures {
 		glActiveTexture(glTexture0 + 5 + uint32(i))
+		if i == gpu.BackdropImage && b.Backdrop != 0 {
+			// A shader reading its backdrop reads it as this image, its
+			// rows going down.
+			glBindTexture(glTexture2D, r.backdrop[0].tex)
+			continue
+		}
 		glBindTexture(glTexture2D, or(uint32(t), r.empty))
 		if img := b.Shader.Images[i]; t != 0 && img != nil && r.canvasTex[uint32(t)] {
 			flip[i] = int32(img.H)

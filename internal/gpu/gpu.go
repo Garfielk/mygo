@@ -96,6 +96,11 @@ type Instance struct {
 	Transform0, Transform1, Transform2 [4]float32
 }
 
+// BackdropImage is the image of a shader of package ui/shader that holds
+// its backdrop, when it reads it (internal/shader.BackdropImage):
+// renderers bind their backdrop's texture in its place.
+const BackdropImage = 2
+
 // InstanceSize is the size of an Instance in bytes.
 const InstanceSize = int(unsafe.Sizeof(Instance{}))
 

@@ -109,6 +109,41 @@ far, and the effect draws over it all. The element stays where it is for
 clicks, focus and accessibility: only what shows changes. An effect's
 shader reads images 0 to 2 of its own; image 3 is the content.
 
+## The backdrop
+
+A shader can read what the window drew behind it, as Flutter's
+`BackdropFilter` with a shader does: frosted panes, lenses, a tint that
+follows what scrolls under it. `backdropAt(p)` returns its pixel at `p`,
+and `backdropSample(p)` blends the pixels around `p`, `p` in DIPs as
+`pos` is; `Options.BackdropBlur` blurs it first, its standard deviation
+in DIPs:
+
+```go
+var frost = shader.MustCompile(`package main
+
+var Tint vec4
+
+func Fragment(dst vec4, pos vec2) vec4 {
+	b := backdropSample(pos)
+	return mix(b, Tint, Tint.a)
+}
+`)
+
+ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
+	frost.Draw(p, r, shader.Options{
+		BackdropBlur: 12,
+		Uniforms:     map[string]any{"Tint": ui.RGBA(255, 255, 255, 0.3)},
+		Radius:       16,
+	})
+})
+```
+
+The renderers capture the backdrop as they do for the glass plugin's
+panes, every frame, so it follows whatever moves behind. An element's
+effect reads it too. A shader reading its backdrop draws rectangles
+(`Draw`, `Effect`), not shapes (`Fill`), and reads images 0, 1 and 3 of
+its own; image 2 is the backdrop.
+
 ## The language
 
 A shader is a Go file of package main. Its function `Fragment` returns the

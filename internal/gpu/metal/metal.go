@@ -1146,6 +1146,10 @@ func (r *Renderer) bindShader(enc id, b gpu.Batch) {
 		release(&buf) // the encoder keeps it
 	}
 	for i, t := range b.Textures {
+		if i == gpu.BackdropImage && b.Backdrop != 0 {
+			// A shader reading its backdrop reads it as this image.
+			t = uintptr(r.cur.backdrop[0].tex)
+		}
 		send(enc, "setFragmentTexture:atIndex:", or(id(t), r.empty), uintptr(5+i))
 	}
 }

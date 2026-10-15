@@ -2909,7 +2909,13 @@ either.
   effect's entry point (`ColorEffect`, `DistortionEffect`, `LayerEffect`)
   a `Fragment` that calls it, and the bridge reads the content as image 3
   (`LayerImage`) from where the box's corner lies in it
-  (`__layerInset`). Direct3D's compiler takes from 0.1 s to more than 1 s
+  (`__layerInset`). A shader reading its backdrop (`backdropAt`,
+  `backdropSample`) is an effect with `Backdrop`: `Painter.EffectBackdrop`
+  computes the backdrop as the builder will (`scene.BackdropOf` of the
+  op's bounds), the bridge maps positions to its texels
+  (`__backdropRow0`, `__backdropRow1`, `__backdropArea`), and the
+  renderers bind their backdrop texture as its image 2
+  (`gpu.BackdropImage`); the CPU twin reads `scene.BackdropImage`. Direct3D's compiler takes from 0.1 s to more than 1 s
   for a shader's effect (the renderer's head and tail, with its coverage,
   are most of a small one's; optimization levels barely change it), so
   `ui/shader` starts it as it compiles one (`d3d11.PrecompileEffect`), on
