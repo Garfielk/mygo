@@ -2,8 +2,6 @@ package mygo
 
 import (
 	"context"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -84,13 +82,12 @@ func watchDocumentFile(ctx context.Context, path string) {
 	known, _ := os.Lstat(w.Root())
 	known = StatIdentity(known)
 	for {
-		if _, err := w.Next(ctx); err != nil {
+		events, err := w.Next(ctx)
+		if err != nil {
 			return
 		}
-		// A batch says only that the file may have changed; one gone may
-		// have been renamed.
 		moved := ""
-		if _, err := os.Lstat(w.Root()); errors.Is(err, fs.ErrNotExist) && known != nil {
+		if events[len(events)-1].Op == FileRemove && known != nil {
 			moved = findRenamed(filepath.Dir(w.Root()), known)
 		}
 		for _, b := range documentsAt(path) {

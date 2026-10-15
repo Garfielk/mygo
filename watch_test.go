@@ -77,7 +77,7 @@ func fileWatchTestBatch(t *testing.T, w *FileWatcher) []FileEvent {
 
 func TestFileWatchLifecycle(t *testing.T) {
 	dir := t.TempDir()
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestFileWatchLifecycle(t *testing.T) {
 // Canceling the context of a watch stops it as Close does.
 func TestFileWatchContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	w, err := WatchFiles(ctx, t.TempDir(), FileWatchOptions{Precise: true})
+	w, err := WatchFiles(ctx, t.TempDir(), FileWatchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestFileWatchParentSentinel(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("only Windows enrolls a parent sentinel")
 	}
-	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestFileWatchParentSentinel(t *testing.T) {
 }
 
 func TestFileWatchStaleFailureIgnored(t *testing.T) {
-	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Precise: true})
+	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,18 +168,18 @@ func TestFileWatchStaleFailureIgnored(t *testing.T) {
 }
 
 func TestFileWatchValidation(t *testing.T) {
-	if w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Precise: true, MaxEntries: -1}); err == nil {
+	if w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{MaxEntries: -1}); err == nil {
 		w.Close()
 		t.Fatal("accepted a negative limit")
 	}
-	if _, err := WatchFiles(nil, t.TempDir(), FileWatchOptions{Precise: true}); err == nil {
+	if _, err := WatchFiles(nil, t.TempDir(), FileWatchOptions{}); err == nil {
 		t.Fatal("nil context")
 	}
-	if _, err := WatchFiles(context.Background(), "", FileWatchOptions{Precise: true}); err == nil {
+	if _, err := WatchFiles(context.Background(), "", FileWatchOptions{}); err == nil {
 		t.Fatal("empty path")
 	}
 	// A MaxDelay shorter than Debounce is Debounce.
-	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Precise: true, Debounce: time.Second, MaxDelay: time.Millisecond})
+	w, err := WatchFiles(context.Background(), t.TempDir(), FileWatchOptions{Debounce: time.Second, MaxDelay: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestFileWatchRecursiveLimit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, MaxEntries: 2}); !errors.Is(err, ErrWatchLimit) {
+	if _, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, MaxEntries: 2}); !errors.Is(err, ErrWatchLimit) {
 		t.Fatalf("limit: %v", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestFileWatchRecursiveLimit(t *testing.T) {
 // changed meanwhile comes in the next batch.
 func TestFileWatchBackpressure(t *testing.T) {
 	dir := t.TempDir()
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestFileWatchRootLoss(t *testing.T) {
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestFileWatchEnrollmentRace(t *testing.T) {
 				name := fmt.Sprintf("recursive=%v/replace=%v/directory=%v", recursive, replace, isDir)
 				t.Run(name, func(t *testing.T) {
 					dir := t.TempDir()
-					w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: recursive, Debounce: -1})
+					w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: recursive, Debounce: -1})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -342,7 +342,7 @@ func TestFileWatchLooksOnlyWhereNotified(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestFileWatchRescan(t *testing.T) {
 	if err := os.Rename(filepath.Join(dir, "outside"), filepath.Join(base, "outside")); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestFileWatchDirectoryRename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a", "b", "c"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestFileWatchSubtree(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +784,7 @@ func TestFileWatchFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "sibling"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), file, FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,7 +878,7 @@ func TestFileWatchIgnore(t *testing.T) {
 	}
 	// Only the root, src, src/main.go and src/new.go, created below,
 	// count.
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1, Ignore: ignore, MaxEntries: 4})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, Ignore: ignore, MaxEntries: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestFileWatchIgnoreSubtree(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".git", "objects"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1, Ignore: func(p string, isDir bool) bool { return p == ".git" }})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, Ignore: func(p string, isDir bool) bool { return p == ".git" }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,7 +952,7 @@ func TestFileWatchNoFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,7 +984,7 @@ func TestFileWatchNoFiles(t *testing.T) {
 	// A watched file: only its directory is enrolled, and a replacement
 	// is a write.
 	file := filepath.Join(dir, "f")
-	fw, err := WatchFiles(context.Background(), file, FileWatchOptions{Precise: true, Debounce: -1})
+	fw, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1010,7 @@ func TestFileWatchNoFiles(t *testing.T) {
 // rather than making it look at everything; only more than MaxEntries
 // notices do.
 func TestFileWatchSpill(t *testing.T) {
-	w := &FileWatcher{ctx: context.Background(), opts: FileWatchOptions{Precise: true, MaxEntries: 3}, raw: make(chan platform.FileWatchNotice, 1), spilled: make(chan struct{}, 1), overflow: make(chan struct{}, 1)}
+	w := &FileWatcher{ctx: context.Background(), opts: FileWatchOptions{MaxEntries: 3}, raw: make(chan platform.FileWatchNotice, 1), spilled: make(chan struct{}, 1), overflow: make(chan struct{}, 1)}
 	for i := range 4 {
 		w.notice(platform.FileWatchNotice{Target: uint64(i)})
 	}
@@ -1051,7 +1051,7 @@ func TestFileWatchMetadata(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1111,7 +1111,7 @@ func TestFileWatchInaccessible(t *testing.T) {
 		return nil
 	}
 	defer func() { fb.FileWatchAddHook = nil }()
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1179,7 +1179,7 @@ func BenchmarkFileWatchScan(b *testing.B) {
 			b.Fatal(err)
 		}
 		ignore := func(p string, _ bool) bool { return p == ".git" }
-		w := &FileWatcher{ctx: context.Background(), root: root, native: native, opts: FileWatchOptions{Precise: true, Recursive: true, MaxEntries: 1 << 20, Ignore: ignore}}
+		w := &FileWatcher{ctx: context.Background(), root: root, native: native, opts: FileWatchOptions{Recursive: true, MaxEntries: 1 << 20, Ignore: ignore}}
 		s := newFileWatchScan(w)
 		if _, err := s.start(); err != nil {
 			b.Fatal(err)
@@ -1211,16 +1211,16 @@ func fileWatchTestHints(t *testing.T, w *FileWatcher) []string {
 	var paths []string
 	for _, e := range fileWatchTestBatch(t, w) {
 		if e.Op != FileHint || !e.IsDir || e.OldPath != "" {
-			t.Fatalf("a watch without Precise reported %+v", e)
+			t.Fatalf("a hints-only watch reported %+v", e)
 		}
 		paths = append(paths, e.Path)
 	}
 	return paths
 }
 
-// A watch enrolls directories, keeps no snapshot and says only in which
-// directory something changed, unless Precise.
-func TestFileWatchHints(t *testing.T) {
+// A hints-only watch enrolls directories, keeps no snapshot and says only
+// in which directory something changed.
+func TestFileWatchHintsOnly(t *testing.T) {
 	dir := t.TempDir()
 	for _, p := range []string{"a/b", "node_modules/pkg"} {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(p)), 0700); err != nil {
@@ -1231,7 +1231,7 @@ func TestFileWatchHints(t *testing.T) {
 		t.Fatal(err)
 	}
 	ignore := func(p string, isDir bool) bool { return p == "node_modules" }
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, Ignore: ignore})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, HintsOnly: true, Ignore: ignore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1305,10 +1305,10 @@ func TestFileWatchHints(t *testing.T) {
 	}
 }
 
-// With a backend that watches a tree with one target, a watch enrolls
-// nothing else, and hints at the directory of what changed deep
+// With a backend that watches a tree with one target, a hints-only watch
+// enrolls nothing else, and hints at the directory of what changed deep
 // down, but not in an ignored one.
-func TestFileWatchHintsSubtree(t *testing.T) {
+func TestFileWatchHintsOnlySubtree(t *testing.T) {
 	fb.FileWatchSubtree = true
 	defer func() { fb.FileWatchSubtree = false }()
 	dir := t.TempDir()
@@ -1316,7 +1316,7 @@ func TestFileWatchHintsSubtree(t *testing.T) {
 		t.Fatal(err)
 	}
 	ignore := func(p string, isDir bool) bool { return path.Base(p) == ".git" }
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, Ignore: ignore})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, HintsOnly: true, Ignore: ignore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1333,15 +1333,15 @@ func TestFileWatchHintsSubtree(t *testing.T) {
 	}
 }
 
-// A watch of a file hints at it, not at the other entries of
+// A hints-only watch of a file hints at it, not at the other entries of
 // its directory.
-func TestFileWatchHintsFile(t *testing.T) {
+func TestFileWatchHintsOnlyFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "config.json")
 	if err := os.WriteFile(file, []byte("a"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1})
+	w, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1, HintsOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1358,8 +1358,8 @@ func TestFileWatchHintsFile(t *testing.T) {
 	}
 }
 
-// With Precise, the same change is the precise event it always was.
-func TestFileWatchPreciseOptIn(t *testing.T) {
+// Without HintsOnly, the same change is the precise event it always was.
+func TestFileWatchHintsOnlyOptIn(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
 		t.Fatal(err)
@@ -1367,7 +1367,7 @@ func TestFileWatchPreciseOptIn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "a", "b", "f"), []byte("x"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Precise: true, Recursive: true, Debounce: -1})
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
