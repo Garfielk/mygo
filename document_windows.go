@@ -10,6 +10,22 @@ import (
 
 func fileLinks(os.FileInfo) int { return 1 }
 
+// openShared opens the file at path to read it, letting other apps
+// delete, rename or replace it meanwhile, as editors save: os.Open shares
+// reading and writing only, and an app saving over a document while the
+// app read it would be refused ("Access is denied").
+func openShared(path string) (*os.File, error) {
+	p, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	h, err := syscall.CreateFile(p, syscall.GENERIC_READ, syscall.FILE_SHARE_READ|syscall.FILE_SHARE_WRITE|syscall.FILE_SHARE_DELETE, nil, syscall.OPEN_EXISTING, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 // fileWritable reports whether the file at path lacks the read-only
 // attribute, as Notepad checks it.
 func fileWritable(path string) bool {
