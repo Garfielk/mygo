@@ -215,6 +215,7 @@ func (ip *inlineParser) run(s string) {
 	if ip.ext&ExtAutolinks != 0 && strings.IndexByte(s, '@') >= 0 {
 		ip.emailLinks(0, false)
 	}
+	ip.d.steps += ip.html.steps
 }
 
 func (ip *inlineParser) newNode(kind InlineKind, text string, start, end int) int32 {
@@ -408,6 +409,7 @@ func (ip *inlineParser) parseString() {
 		}
 		j++
 	}
+	ip.d.steps += j - ip.pos
 	ip.addText(ip.pos, j)
 	ip.pos = j
 }
@@ -459,6 +461,9 @@ func (ip *inlineParser) parseBackslash() {
 			if *none < 0 || ip.pos < *none {
 				if k = strings.Index(s[ip.pos+1:], end); k < 0 {
 					*none = ip.pos
+					ip.d.steps += len(s) - ip.pos - 1
+				} else {
+					ip.d.steps += k
 				}
 			}
 			if k > 0 {
@@ -533,10 +538,12 @@ func (ip *inlineParser) scanCloseBackticks(n int) int {
 			ip.backticks[m] = i
 		}
 		if m == n {
+			ip.d.steps += j - ip.pos
 			return j
 		}
 		i = j
 	}
+	ip.d.steps += len(s) - ip.pos
 	ip.scannedBackticks = true
 	return 0
 }
@@ -551,12 +558,14 @@ func (ip *inlineParser) parseDollar() bool {
 		}
 		k := strings.Index(s[start+2:], "$$")
 		if k < 0 {
+			ip.d.steps += len(s) - start - 2
 			ip.noMath = start
 			if ip.openMath < 0 {
 				ip.openMath = start
 			}
 			return false
 		}
+		ip.d.steps += k
 		if strings.Trim(s[start+2:start+2+k], " \t\n") == "" {
 			return false
 		}
@@ -576,12 +585,14 @@ func (ip *inlineParser) parseDollar() bool {
 	if ip.noDollar >= 0 && start >= ip.noDollar {
 		return false
 	}
+	j := start + 1
 	defer func() {
+		ip.d.steps += j - start
 		if ip.pos == start {
 			ip.noDollar = start
 		}
 	}()
-	for j := start + 1; j < len(s); j++ {
+	for ; j < len(s); j++ {
 		switch s[j] {
 		case '\\':
 			j++
@@ -772,8 +783,10 @@ func (ip *inlineParser) processEmphasis(bottom int, final bool) {
 	closer := int32(-1)
 	for c := ip.last; c >= 0 && ip.dl[c].at >= bottom; c = ip.dl[c].prev {
 		closer = c
+		ip.d.steps++
 	}
 	for closer >= 0 {
+		ip.d.steps++
 		cd := &ip.dl[closer]
 		if !cd.canClose {
 			closer = cd.next
@@ -783,6 +796,7 @@ func (ip *inlineParser) processEmphasis(bottom int, final bool) {
 		opener := cd.prev
 		found := false
 		for opener >= 0 && ip.dl[opener].at >= openersBottom[cd.orig%3][ci] {
+			ip.d.steps++
 			od := &ip.dl[opener]
 			odd := (cd.canOpen || od.canClose) && cd.orig%3 != 0 && (od.orig+cd.orig)%3 == 0
 			if od.c == cd.c && od.canOpen && !odd {
@@ -808,6 +822,7 @@ func (ip *inlineParser) processEmphasis(bottom int, final bool) {
 	}
 	// What remains matched nothing.
 	for ip.last >= 0 && ip.dl[ip.last].at >= bottom {
+		ip.d.steps++
 		if d := ip.dl[ip.last]; final && d.canOpen && d.n > 0 {
 			ip.leftover = append(ip.leftover, d)
 		}
@@ -851,6 +866,7 @@ func (ip *inlineParser) insertEmph(opener, closer int32) int32 {
 	}
 	emph := ip.newNode(kind, "", ip.nodes[on].end, ip.nodes[cn].start)
 	for t := ip.nodes[on].next; t >= 0 && t != cn; {
+		ip.d.steps++
 		next := ip.nodes[t].next
 		ip.unlink(t)
 		ip.appendChild(emph, t)
@@ -859,6 +875,7 @@ func (ip *inlineParser) insertEmph(opener, closer int32) int32 {
 	ip.insertAfter(on, emph)
 	// The delimiters between are gone.
 	for k := ip.dl[closer].prev; k >= 0 && k != opener; {
+		ip.d.steps++
 		prev := ip.dl[k].prev
 		ip.removeDelim(k)
 		k = prev
@@ -885,6 +902,7 @@ func (ip *inlineParser) insertStrike(opener, closer int32) int32 {
 		on, cn := od.node, cd.node
 		st := ip.newNode(Strikethrough, "", ip.nodes[on].start, ip.nodes[cn].end)
 		for t := ip.nodes[on].next; t >= 0 && t != cn; {
+			ip.d.steps++
 			n := ip.nodes[t].next
 			ip.unlink(t)
 			ip.appendChild(st, t)
@@ -895,6 +913,7 @@ func (ip *inlineParser) insertStrike(opener, closer int32) int32 {
 		ip.unlink(cn)
 	}
 	for k := closer; k >= 0 && k != opener; {
+		ip.d.steps++
 		prev := ip.dl[k].prev
 		ip.removeDelim(k)
 		k = prev
@@ -974,6 +993,7 @@ func (ip *inlineParser) parseCloseBracket() {
 			ip.pos = start
 		}
 		if has {
+			ip.d.steps += len(label)
 			key := normalizeLabel(label[1 : len(label)-1])
 			if key != "" {
 				ip.noteLabel(key)
@@ -992,6 +1012,7 @@ func (ip *inlineParser) parseCloseBracket() {
 		l := ip.newNode(kind, "", openStart, ip.pos)
 		ip.nodes[l].dest, ip.nodes[l].title = dest, title
 		for t := ip.nodes[op.node].next; t >= 0; {
+			ip.d.steps++
 			next := ip.nodes[t].next
 			ip.unlink(t)
 			ip.appendChild(l, t)
@@ -1003,6 +1024,7 @@ func (ip *inlineParser) parseCloseBracket() {
 		ip.unlink(op.node)
 		if !op.image {
 			for b := ip.lastB; b >= 0; b = ip.br[b].prev {
+				ip.d.steps++
 				if !ip.br[b].image {
 					ip.br[b].active = false
 				}
@@ -1012,6 +1034,7 @@ func (ip *inlineParser) parseCloseBracket() {
 	}
 	// A footnote reference: [^label], when the footnote is defined.
 	if ip.ext&ExtFootnotes != 0 && !op.image && !op.bracketAfter && op.index < start-1 && s[op.index] == '^' && start-1 > op.index+1 && start-1-op.index <= 1000 {
+		ip.d.steps += start - 1 - op.index
 		key := normalizeLabel(s[op.index+1 : start-1])
 		ip.noteLabel("^" + key)
 		if _, ok := ip.d.notes[key]; ok {
@@ -1019,6 +1042,7 @@ func (ip *inlineParser) parseCloseBracket() {
 			f := ip.newNode(FootnoteRef, s[op.index+1:start-1], ip.nodes[op.node].start, start)
 			ip.processEmphasis(op.index, false)
 			for t := ip.nodes[op.node].next; t >= 0; {
+				ip.d.steps++
 				next := ip.nodes[t].next
 				ip.unlink(t)
 				t = next
@@ -1068,8 +1092,10 @@ func (ip *inlineParser) parseLinkLabel() int {
 		case '\\':
 			j++
 		case '[':
+			ip.d.steps += j - i
 			return 0
 		case ']':
+			ip.d.steps += j - i
 			if j-i > 1000 {
 				return 0
 			}
@@ -1078,6 +1104,7 @@ func (ip *inlineParser) parseLinkLabel() int {
 		}
 		j++
 	}
+	ip.d.steps += j - i
 	return 0
 }
 
@@ -1094,12 +1121,15 @@ func (ip *inlineParser) parseLinkDestination() (string, bool) {
 					j++
 				}
 			case '\n', '<':
+				ip.d.steps += j - i
 				return "", false
 			case '>':
+				ip.d.steps += j - i
 				ip.pos = j + 1
 				return unescapeString(s[i+1 : j]), true
 			}
 		}
+		ip.d.steps += len(s) - i
 		return "", false
 	}
 	parens := 0
@@ -1113,6 +1143,7 @@ loop:
 		case c == '(':
 			parens++
 			if parens > 32 {
+				ip.d.steps += j - i
 				return "", false
 			}
 			j++
@@ -1128,6 +1159,7 @@ loop:
 			j++
 		}
 	}
+	ip.d.steps += j - i
 	if j == i && (j >= len(s) || s[j] != ')') {
 		return "", false
 	}
@@ -1158,12 +1190,15 @@ func (ip *inlineParser) parseLinkTitle() (string, bool) {
 		case c == '\\' && j+1 < len(s):
 			j++
 		case c == end:
+			ip.d.steps += j - i
 			ip.pos = j + 1
 			return unescapeString(s[i+1 : j]), true
 		case c == '(' && end == ')':
+			ip.d.steps += j - i
 			return "", false
 		}
 	}
+	ip.d.steps += len(s) - i
 	return "", false
 }
 
@@ -1276,6 +1311,7 @@ func (ip *inlineParser) flatten(d *Document, block, base, healFrom int) []Inline
 			if nd.kind == Text && nd.text == "" {
 				continue
 			}
+			d.steps++
 			i := len(out)
 			out = append(out, Inline{Kind: nd.kind, Text: nd.text, Dest: nd.dest, Title: nd.title, Start: srcOf(nd.start), End: srcOf(nd.end), Auto: nd.auto, Display: nd.display})
 			if nd.end > healFrom && (nd.kind == Link || nd.kind == Image) {
@@ -1295,12 +1331,14 @@ func (ip *inlineParser) flatten(d *Document, block, base, healFrom int) []Inline
 // run of many, as delimiters left unmatched, takes linear time.
 func (ip *inlineParser) joinTexts(n int32) {
 	for c := ip.nodes[n].first; c >= 0; c = ip.nodes[c].next {
+		ip.d.steps++
 		if ip.nodes[c].kind != Text {
 			ip.joinTexts(c)
 			continue
 		}
 		last := c
 		for nx := ip.nodes[c].next; nx >= 0 && ip.nodes[nx].kind == Text; nx = ip.nodes[nx].next {
+			ip.d.steps++
 			last = nx
 		}
 		if last == c {

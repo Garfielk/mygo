@@ -447,6 +447,7 @@ func (d *Document) parse(off, end int, resync func(line int) bool) bool {
 			} else {
 				nl += pos
 			}
+			d.steps += nl - pos
 		}
 		if cr < pos {
 			if cr = strings.IndexByte(src[pos:], '\r'); cr < 0 {
@@ -454,6 +455,7 @@ func (d *Document) parse(off, end int, resync func(line int) bool) bool {
 			} else {
 				cr += pos
 			}
+			d.steps += cr - pos
 		}
 		lineEnd, next := nl, nl+1
 		if cr < nl {
@@ -594,6 +596,7 @@ func (p *blockParser) addChild(parent int, kind Kind, start int) int {
 // isBelow reports whether block c is a descendant of block parent.
 func (p *blockParser) isBelow(c, parent int) bool {
 	for c >= 0 {
+		p.d.steps++
 		c = p.d.blocks[c].Parent
 		if c == parent {
 			return true
@@ -735,6 +738,7 @@ func (p *blockParser) resolveDefinitions(i int) bool {
 	text, _ := d.contentOf(i)
 	pos := 0
 	for pos < len(text) && text[pos] == '[' {
+		d.steps++
 		n := d.inp.parseReference(d, text[pos:], d.srcOffset(i, pos))
 		if n == 0 {
 			break
@@ -747,6 +751,7 @@ func (p *blockParser) resolveDefinitions(i int) bool {
 	// Drop the lines the definitions took.
 	consumed := pos
 	for b.segA < b.segB {
+		d.steps++
 		s := d.segs[b.segA]
 		l := int(s.pad) + int(s.end-s.start) + 1
 		if consumed < l {
@@ -875,6 +880,7 @@ func (p *blockParser) checkOpenBlocks(allMatched *bool) (int, bool) {
 	d := p.d
 	container := 0
 	for {
+		d.steps++
 		lc := d.blocks[container].parse.lastChild
 		if lc < 0 || !d.blocks[lc].parse.open {
 			break
@@ -1523,6 +1529,7 @@ func (d *Document) srcOffset(i, off int) int {
 	}
 	segs := d.segsOf(b)
 	for k, s := range segs {
+		d.steps++
 		l := int(s.pad) + int(s.end-s.start)
 		if s.cell {
 			// Each \| removed shifts what follows by one.
