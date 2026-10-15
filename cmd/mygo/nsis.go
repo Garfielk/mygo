@@ -193,18 +193,24 @@ Function CreateDesktopShortcut
   CreateShortCut "$DESKTOP\` + shortcut + `" "$INSTDIR\` + nsisEscape(exe) + `"
 FunctionEnd
 
-; Deletes the shortcut on the stack, trying again for 5 s while it is in
-; use: Explorer opens a new shortcut a few seconds after it appears, not
-; sharing it for deletion, and Delete fails meanwhile. It succeeds when
-; there is no shortcut.
-Function un.DeleteShortcut
+; Removes the file or the folder on the stack, trying again for 10 s
+; while deleting fails: the uninstaller that started this copy of itself
+; may not have exited yet, and Windows refuses to delete a running
+; program's file; Explorer opens a new shortcut a few seconds after it
+; appears, not sharing it for deletion. RMDir /r deletes what it can and
+; leaves the rest. It succeeds when there is nothing to remove.
+Function un.Remove
   Exch $0
   Push $1
-  StrCpy $1 50
+  StrCpy $1 100
   retry:
-    ClearErrors
-    Delete $0
-    IfErrors 0 done
+    IfFileExists "$0\*.*" 0 file
+      RMDir /r $0
+      Goto removed
+    file:
+      Delete $0
+    removed:
+    IfFileExists $0 0 done
     IntOp $1 $1 - 1
     IntCmp $1 0 done
     Sleep 100
@@ -216,13 +222,14 @@ FunctionEnd
 
 Section "Uninstall"
   Push "$SMPROGRAMS\` + shortcut + `"
-  Call un.DeleteShortcut
+  Call un.Remove
   Push "$DESKTOP\` + shortcut + `"
-  Call un.DeleteShortcut
+  Call un.Remove
   DeleteRegKey HKCU ` + nsisString(uninstallKey) + `
 ` + unregister + `  ; Last, so that the app's folder is gone once the uninstall is done:
   ; the uninstaller runs from a copy of itself that nothing waits for.
-  RMDir /r "$INSTDIR"
+  Push "$INSTDIR"
+  Call un.Remove
 SectionEnd
 `
 	nsi := filepath.Join(work, "installer.nsi")

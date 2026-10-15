@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,8 @@ import (
 // executable, the uninstaller and the installer. On Windows, it installs
 // and uninstalls the app silently: the install makes the Start menu
 // shortcut but not the desktop one the finish page offers, and the
-// uninstall removes both.
+// uninstall removes both, and the app's folder though Uninstall.exe is
+// still running when the uninstaller's copy first deletes it.
 func TestWindowsInstaller(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles programs")
@@ -98,6 +100,32 @@ func TestWindowsInstaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Remove(desktop) })
+	// The uninstaller that starts the copy of itself which uninstalls may
+	// not have exited when the copy deletes it, and Windows refuses to
+	// delete the file of a running program. Uninstall.exe stays mapped as
+	// a program is until the copy has removed what it could of the app's
+	// folder: the copy removes the rest once it is unmapped.
+	release, err := holdImage(filepath.Join(install, "Uninstall.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan error, 1)
+	go func() {
+		defer release()
+		// A minute only guards against a hang.
+		for deadline := time.Now().Add(time.Minute); fileExists(filepath.Join(install, "data", "a.txt")); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				released <- errors.New("the uninstaller did not remove data/a.txt in a minute")
+				return
+			}
+		}
+		released <- nil
+	}()
+	defer func() {
+		if err := <-released; err != nil {
+			t.Error(err)
+		}
+	}()
 	defer func() {
 		for _, key := range []string{`com.example.setuptest.setuptest`, `setuptest`} {
 			if registered(key) {
@@ -113,24 +141,16 @@ func TestWindowsInstaller(t *testing.T) {
 	uninstall(t, install)
 }
 
-// uninstall runs the uninstaller of the app installed in dir silently, and
-// waits until it is done.
+// uninstall runs the uninstaller of the app installed in dir silently,
+// waits until it is done, and checks that the app's folder is gone.
 func uninstall(t *testing.T, dir string) {
 	t.Helper()
-	if out, err := exec.Command(filepath.Join(dir, "Uninstall.exe"), "/S").CombinedOutput(); err != nil {
+	if out, err := runUninstaller(exec.Command(filepath.Join(dir, "Uninstall.exe"), "/S")); err != nil {
 		t.Fatalf("uninstalling: %v\n%s", err, out)
 	}
-	// The uninstaller copies itself away and runs from there, and removes
-	// the app's folder last.
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the uninstaller left the app installed")
-		}
-		time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		left, _ := filepath.Glob(filepath.Join(dir, "*"))
+		t.Fatalf("the uninstaller left the app installed: %q", left)
 	}
 }
 

@@ -3533,10 +3533,16 @@ renderer's (`gputest.Compare`).
   under `HKCU\…\Uninstall\<identifier>`; `/S /D=<dir>` installs
   silently, without the desktop shortcut. The uninstaller runs from a
   copy of itself that nothing waits for, so it removes the app's folder
-  last: the folder is gone once the uninstall is done. It tries deleting
-  each shortcut again for up to 5 s, as Explorer opens a new shortcut a
-  few seconds after it appears, not sharing it for deletion, and `Delete`
-  fails meanwhile.
+  last: the folder is gone once the uninstall is done. It tries removing
+  each shortcut and the folder again for up to 10 s while deleting fails:
+  the uninstaller that started the copy may not have exited when the copy,
+  whose work takes some 15 ms, deletes it, and Windows refuses to delete a
+  running program's file (`ERROR_ACCESS_DENIED`); Explorer opens a new
+  shortcut a few seconds after it appears, not sharing it for deletion.
+  `RMDir /r` deletes what it can and leaves the rest. TestWindowsInstaller
+  keeps `Uninstall.exe` mapped as a running program is until the copy has
+  removed what it could, and waits for the copy to exit
+  (`runUninstaller`), not for a time.
   `makensis` comes from an installation of NSIS or, on Windows, where NSIS
   is rarely installed, from the official zip of the release that
   `Release` in `internal/nsis` pins, which the CLI downloads once, checks
