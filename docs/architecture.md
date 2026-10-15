@@ -1698,7 +1698,9 @@ main thread, so watches work before the app runs and don't wait on it.
   notices are hints: `MustScanSubDirs` or a full queue makes the core look
   at everything again, as an overflow does elsewhere, and the stream's
   10 ms latency is under the core's debounce, which does the coalescing an
-  app sees. The stream starts `SinceNow`, but fseventsd can report a
+  app sees; with `kFSEventStreamCreateFlagNoDefer` the first event after a
+  quiet period comes at once, and those that follow it within the latency
+  are batched. The stream starts `SinceNow`, but fseventsd can report a
   change made just before it started; the core's snapshot is taken as
   targets are enrolled, so nothing comes of it.
 - Linux: one inotify instance for the process, as fsnotify, with a watch
