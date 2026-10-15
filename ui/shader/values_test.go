@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/egoist/mygo/internal/gpu"
+	"github.com/egoist/mygo/internal/shader"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -16,8 +18,8 @@ func TestWideColors(t *testing.T) {
 	var narrow, wide ui.ShaderInput
 	view := func(c *ui.Context) {
 		ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-			narrow = s.input(p, r, Options{Values: s.NewValues().Color(tint, ui.RGB(255, 0, 0))}, ui.Point{})
-			wide = s.input(p, r, Options{Uniforms: map[string]any{"Tint": vivid}}, ui.Point{})
+			narrow = s.input(p, r, r, Options{Values: s.NewValues().Color(tint, ui.RGB(255, 0, 0))}, ui.Point{})
+			wide = s.input(p, r, r, Options{Uniforms: map[string]any{"Tint": vivid}}, ui.Point{})
 		})
 	}
 	ui.NewTester(view, 10, 10).Image()
@@ -37,5 +39,12 @@ func TestWideColors(t *testing.T) {
 		if (i < w || i >= w+4) && wide.Uniforms[i] != wide.WideUniforms[i] {
 			t.Errorf("word %d differs for a wide gamut", i)
 		}
+	}
+}
+
+// The renderers bind the backdrop where the bridge reads it.
+func TestBackdropImage(t *testing.T) {
+	if gpu.BackdropImage != shader.BackdropImage {
+		t.Fatalf("renderers bind the backdrop as image %d, shaders read image %d", gpu.BackdropImage, shader.BackdropImage)
 	}
 }

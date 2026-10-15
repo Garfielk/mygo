@@ -76,11 +76,50 @@ func (p *Painter) Effect(fx *scene.Effect, r Rect, radii [4]float32, blur float3
 type ShaderInput struct {
 	Uniforms, WideUniforms []uint32
 	Images                 [4]*Bitmap
+	// Blur, for a shader reading its backdrop, is the standard deviation
+	// of the backdrop's blur, in pixels.
+	Blur float32
+}
+
+// EffectBackdrop is where the backdrop of an effect lies (Painter.
+// EffectBackdrop), as the renderers capture it: ToFrame maps a point in
+// DIPs from a corner to the frame's pixels (x' = ToFrame[0]·(x, y, 1), y'
+// = ToFrame[1]·(x, y, 1)); the texels start at Origin, in the frame's
+// pixels, each Down pixels across, W×H of them.
+type EffectBackdrop struct {
+	ToFrame [2][3]float32
+	Origin  [2]float32
+	Down    float32
+	W, H    int
+}
+
+// EffectBackdrop returns where the backdrop of an effect over r, in DIPs,
+// blurred by blur pixels, lies, its points from inset, in pixels from the
+// corner of r on the pixel grid: what the renderers read for it, the
+// same for every renderer.
+func (p *Painter) EffectBackdrop(r Rect, blur float32, inset Point) EffectBackdrop {
+	rect := p.snap(r)
+	m := p.transform.Pixels(p.scale)
+	bk := scene.BackdropOf(m.Bounds(rect), blur, p.s.Width, p.s.Height)
+	w, h := bk.Size()
+	s := p.scale
+	// Corner, then the op's local pixels, then the frame's.
+	cx, cy := rect.X+inset.X, rect.Y+inset.Y
+	a, b, c, d, x, y := float32(1), float32(0), float32(0), float32(1), float32(0), float32(0)
+	if m.Set {
+		a, b, c, d, x, y = m.A, m.B, m.C, m.D, m.X, m.Y
+	}
+	return EffectBackdrop{
+		ToFrame: [2][3]float32{{a * s, c * s, a*cx + c*cy + x}, {b * s, d * s, b*cx + d*cy + y}},
+		Origin:  [2]float32{float32(bk.Area.Min.X), float32(bk.Area.Min.Y)},
+		Down:    float32(bk.Down),
+		W:       w, H: h,
+	}
 }
 
 // op returns the effect op of fx reading in.
 func (in *ShaderInput) op(fx *scene.Effect) scene.EffectOp {
-	op := scene.EffectOp{Effect: fx, Uniforms: in.Uniforms, WideUniforms: in.WideUniforms}
+	op := scene.EffectOp{Effect: fx, Uniforms: in.Uniforms, WideUniforms: in.WideUniforms, Blur: in.Blur}
 	for i, b := range in.Images {
 		if b != nil {
 			op.Images[i] = b.img
