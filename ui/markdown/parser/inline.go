@@ -1301,8 +1301,9 @@ func (ip *inlineParser) flatten(d *Document, block, base, healFrom int) []Inline
 		return nil
 	}
 	out := make([]Inline, 0, len(ip.nodes)-1)
+	m := d.sourceMap(block)
 	srcOf := func(off int) int {
-		return d.srcOffset(block, base+min(off, healFrom))
+		return m.source(base + min(off, healFrom))
 	}
 	var walk func(n int32)
 	walk = func(n int32) {

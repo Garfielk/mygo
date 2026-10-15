@@ -245,6 +245,8 @@ type Document struct {
 	// and lines walked, as the loops that could take quadratic time do it.
 	// Tests check that it grows linearly with the source.
 	steps int
+	// marks is the buffer of the last sourceMap.
+	marks []int
 }
 
 type oldInline struct {

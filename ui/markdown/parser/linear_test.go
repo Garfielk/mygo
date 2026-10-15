@@ -35,6 +35,10 @@ var pathological = []struct {
 	{"link definitions", Default, repeat("[a]: u\n")},
 	{"tables", Default, func(n int) string { return "| a |\n|---|\n" + strings.Repeat("|\n", n) }},
 	{"pipes", Default, func(n int) string { return strings.Repeat("| ", n) + "\n|" + strings.Repeat("-|", n) }},
+	{"lines ending in CR", Default, repeat("a\r")},
+	{"indented lines", Default, repeat("a\n ")},
+	{"quoted lines", Default, repeat("> a\n")},
+	{"escaped pipes", Default, func(n int) string { return "| a |\n|---|\n| " + strings.Repeat(`\| *a* `, n) + "|" }},
 }
 
 func repeat(unit string) func(int) string {
