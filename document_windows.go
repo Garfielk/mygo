@@ -10,10 +10,13 @@ import (
 
 func fileLinks(os.FileInfo) int { return 1 }
 
-// openShared opens the file at path to read it, letting other apps
-// delete, rename or replace it meanwhile, as editors save: os.Open shares
-// reading and writing only, and an app saving over a document while the
-// app read it would be refused ("Access is denied").
+// openShared opens the file at path to read it, sharing its deletion as
+// Notepad and VS Code do: os.Open shares reading and writing only, so
+// while the app read a document, another app deleting it, or replacing it
+// as editors save, was refused ("Access is denied"). Shared, a deletion
+// or a POSIX-semantics rename (FILE_RENAME_POSIX_SEMANTICS) goes through;
+// a classic MoveFileEx is refused while any handle is open, and such an
+// app tries again.
 func openShared(path string) (*os.File, error) {
 	p, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
