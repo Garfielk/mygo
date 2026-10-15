@@ -39,7 +39,9 @@ type fileWatchScan struct {
 	next     uint64
 	// subtree says the root's target watches the whole tree (Windows), so
 	// no other directory is enrolled; noSubtree that the backend can't.
-	subtree, noSubtree bool
+	// noFiles says the backend watches files only through their
+	// directories, so no file is enrolled.
+	subtree, noSubtree, noFiles bool
 	// What to look at again in the next update: directories to list,
 	// entries to stat, entries the system said were written, and whether
 	// to list every directory, after the system lost changes.
@@ -118,12 +120,13 @@ func (s *fileWatchScan) start() ([]FileEvent, error) {
 			return nil, err
 		}
 	}
-	s.before = map[string]os.FileInfo{}
+	// The initial contents are not events, so what the scan sees is not
+	// kept as it was before (touch).
+	s.before = nil
 	if err = s.visit(s.root, ".", info); err != nil {
 		return nil, err
 	}
-	// The initial contents are not events.
-	clear(s.before)
+	s.before = map[string]os.FileInfo{}
 	return s.events(), nil
 }
 
@@ -802,8 +805,12 @@ func (s *fileWatchScan) descends(p string, info os.FileInfo) bool {
 	return info.IsDir() && !s.file && (p == "." || s.w.opts.Recursive)
 }
 
-// touch remembers p as it is before an update changes it.
+// touch remembers p as it is before an update changes it; nothing during
+// the first scan.
 func (s *fileWatchScan) touch(p string) {
+	if s.before == nil {
+		return
+	}
 	if _, ok := s.before[p]; !ok {
 		s.before[p] = s.entries[p]
 	}
@@ -839,10 +846,11 @@ func (s *fileWatchScan) removeTree(p string) {
 }
 
 // enrolls reports whether enroll has the backend watch p, which the scan
-// saw as info: not when the root's target covers it or it is a symlink or
-// a special file. A watched file is enrolled only while it is a file.
+// saw as info: not when the root's target covers it, it is a file the
+// backend watches through its directory, or a symlink or a special file.
+// A watched file is enrolled only while it is a file.
 func (s *fileWatchScan) enrolls(p string, info os.FileInfo) bool {
-	return (info.Mode().IsRegular() || info.IsDir() && !s.file) && (!s.subtree || p == ".")
+	return (info.Mode().IsRegular() && !s.noFiles || info.IsDir() && !s.file) && (!s.subtree || p == ".")
 }
 
 // enroll has the backend watch p, which the scan saw as info, if it
@@ -889,6 +897,11 @@ func (s *fileWatchScan) add(p string, info os.FileInfo) error {
 		}
 	}
 	if err := s.w.native.Add(t); err != nil {
+		if !t.Directory && errors.Is(err, platform.ErrUnsupported) {
+			// Its directory, enrolled before it was listed, watches it.
+			s.noFiles = true
+			return nil
+		}
 		if errors.Is(err, context.Canceled) {
 			return err
 		}

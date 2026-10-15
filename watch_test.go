@@ -937,6 +937,75 @@ func TestFileWatchIgnoreSubtree(t *testing.T) {
 	}
 }
 
+// A backend that watches files through their directories, as every system
+// backend does, is given only directories, and what changes in a file is
+// named by its directory's target.
+func TestFileWatchNoFiles(t *testing.T) {
+	fb.FileWatchNoFiles = true
+	defer func() { fb.FileWatchNoFiles = false }()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"f", "a/g", "a/b/h"} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(name)), []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	native := w.native.(*fake.FileWatch)
+	for _, target := range native.Targets() {
+		if !target.Directory {
+			t.Errorf("file %s enrolled", target.Path)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "h"), []byte("xy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a/b", platform.FileWatchNotice{Name: "h", Kind: platform.FileWatchWrite})
+	if batch := fileWatchTestBatch(t, w); !slices.Equal(batch, []FileEvent{{Op: FileWrite, Path: "a/b/h"}}) {
+		t.Fatalf("batch = %+v", batch)
+	}
+	// A file replaced, as editors save, is a new file at its path.
+	if err := os.WriteFile(filepath.Join(dir, "a", "g.tmp"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(dir, "a", "g.tmp"), filepath.Join(dir, "a", "g")); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a", platform.FileWatchNotice{Name: "g", Kind: platform.FileWatchMoveTo})
+	if batch := fileWatchTestBatch(t, w); !slices.Equal(batch, []FileEvent{{Op: FileRemove, Path: "a/g"}, {Op: FileCreate, Path: "a/g"}}) {
+		t.Fatalf("batch = %+v", batch)
+	}
+	// A watched file: only its directory is enrolled, and a replacement
+	// is a write.
+	file := filepath.Join(dir, "f")
+	fw, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fw.Close()
+	for _, target := range fw.native.(*fake.FileWatch).Targets() {
+		if target.Path != filepath.Dir(fw.Root()) {
+			t.Errorf("%s enrolled", target.Path)
+		}
+	}
+	if err := os.WriteFile(file+".tmp", []byte("saved"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(file+".tmp", file); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, fw, "..", platform.FileWatchNotice{Name: "f", Kind: platform.FileWatchMoveTo})
+	if batch := fileWatchTestBatch(t, fw); !slices.Equal(batch, []FileEvent{{Op: FileWrite, Path: "."}}) {
+		t.Fatalf("batch = %+v", batch)
+	}
+}
+
 // Changes of permissions alone are not writes.
 func TestFileWatchMetadata(t *testing.T) {
 	dir := t.TempDir()
