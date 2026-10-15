@@ -1628,8 +1628,8 @@ constructor as `image` does: WAV is built in, `audio/vorbis` and
 
 ## Watching files (`watch.go`)
 
-`WatchFiles` keeps what it saw of its directory (`watch_scan.go`): the
-`os.FileInfo` of every file and directory, by path, read through an
+A precise watch (`FileWatchOptions.Precise`) keeps what it saw of its
+directory (`watch_scan.go`): the `os.FileInfo` of every file and directory, by path, read through an
 `os.Root` so that a path can't lead out of it, and symlinks not followed.
 Each directory is opened as an `os.Root` of its own from the one that has
 it, and what is in it is looked at by name relative to it, one call each,
@@ -1667,19 +1667,23 @@ type, before an entry is enrolled, so an ignored directory is never opened;
 the directories it ignored are kept per listed directory, so that the
 notices of a `Subtree` target about what is in them are dropped.
 
-`HintsOnly` swaps the scan for `fileWatchHints` (`watch_hints.go`), behind
-the same `fileWatchLooker` the watch's goroutine drives: no snapshot, only
-the directories it enrolls. A notice naming an entry hints at the
-directory holding it; one naming an enrolled directory, or the directory
-itself, has the next update check that it is still what was enrolled and,
-if not (moved, removed, replaced), drop the targets under it; a name that
-may be a new directory is enrolled with what is beneath it. An overflow
-hints at `.` and enrolls the tree again. Hints under one another collapse
-into the shallowest. On Linux the directories are listed with `getdents`
-types (`watch_hints_linux.go`), as notify walks them, so files are never
-stat'ed; elsewhere a recursive watch is the root's `Subtree` target alone.
-It is opt-in because it gives up what the snapshot is for: exact events,
-renames, writes told from metadata, and which file.
+A watch without `Precise` uses `fileWatchHints` (`watch_hints.go`)
+instead of the scan, behind the same `fileWatchLooker` the watch's
+goroutine drives: no snapshot, only the directories it enrolls. A notice
+naming an entry hints at the directory holding it; one naming an enrolled
+directory, or the directory itself, has the next update check that it is
+still what was enrolled and, if not (moved, removed, replaced), drop the
+targets under it; a name that may be a new directory is enrolled with what
+is beneath it. An overflow hints at `.` and enrolls the tree again. Hints
+under one another collapse into the shallowest. On Linux the directories
+are listed with `getdents` types (`watch_hints_linux.go`), as notify walks
+them, so files are never stat'ed; elsewhere a recursive watch is the
+root's `Subtree` target alone. `Precise` is opt-in because the snapshot
+costs a stat and an entry per file: on a 524,285-entry tree on Linux,
+1.8 s and 300 MB for the first scan, against 1.0 s and 61 MB without it.
+Documents need no more than hints (they look at the disk when a batch
+comes, and find a renamed file by its identity); the watch plugin is
+precise, as its pages are told what changed.
 
 An entry the scan can't look at, a directory without permission or a
 file Windows holds (`pagefile.sys`, a sharing violation), is left as it

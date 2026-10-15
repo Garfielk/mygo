@@ -373,7 +373,8 @@ func (s *service) watch(ctx context.Context, page any, req request, send func(pa
 		delete(s.active, entry)
 		s.mu.Unlock()
 	}()
-	opts := mygo.FileWatchOptions{Recursive: req.Recursive, Debounce: time.Duration(req.DebounceMS) * time.Millisecond}
+	// Pages are given what changed, file by file.
+	opts := mygo.FileWatchOptions{Recursive: req.Recursive, Debounce: time.Duration(req.DebounceMS) * time.Millisecond, Precise: true}
 	if ignore := root.Ignore; ignore != nil {
 		opts.Ignore = func(p string, isDir bool) bool { return ignore(path.Join(req.Path, p), isDir) }
 	}

@@ -15,8 +15,8 @@ import (
 )
 
 // fileWatchLooker is what the goroutine of a watch looks with: the
-// snapshot (fileWatchScan), or with HintsOnly the directories alone
-// (fileWatchHints).
+// directories alone (fileWatchHints), or with Precise the snapshot
+// (fileWatchScan).
 type fileWatchLooker interface {
 	// start enrolls the tree and returns the events of what changed while
 	// it looked.
@@ -38,7 +38,7 @@ type fileWatchLooker interface {
 
 func (s *fileWatchScan) lookAll() { s.all = true }
 
-// fileWatchHints is what a watch with HintsOnly keeps: no snapshot, only
+// fileWatchHints is what a watch without Precise keeps: no snapshot, only
 // the directories it enrolls, and where to look next. Only the goroutine
 // of the watch uses it.
 type fileWatchHints struct {

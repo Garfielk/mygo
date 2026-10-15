@@ -432,77 +432,64 @@ go func() {
 		if err != nil {
 			return // io.EOF once closed, or once dir went away
 		}
-		for _, e := range events {
-			log.Println(e.Op, e.Path)
-		}
+		rebuild(events) // something changed under each event's Path
 	}
 }()
 ```
 
-An event's `Path` is relative to what is watched (`w.Root()`, its path
-with symlinks resolved) and separated by slashes, `.` for itself, and `Op`
-is `mygo.FileCreate`, `FileWrite`, `FileRemove` or `FileRename`, with
-`OldPath` where a rename moved from. What is already there is not
-reported. Changes wait for 50 ms of quiet (`Debounce`, right away when
-negative) before they are reported, and never more than 500 ms
-(`MaxDelay`). A watch compares what it sees with what it saw, so events say
-what is different, not every step that made it so: treat them as hints to
-read the files again. A write is a file whose size or modification time
+A watch says where something changed, not what: each event is a
+`mygo.FileHint` whose `Path` is a directory in or under which the system
+said something changed, relative to what is watched (`w.Root()`, its path
+with symlinks resolved), separated by slashes, `.` for itself, and `.`
+after the system lost changes. Which file, how, and whether it was renamed
+are not known. That is what a dev reloader needs, and it is cheap: the
+watch keeps no snapshot and stats no file. On macOS and Windows a
+recursive watch enrolls only its directory, which the system watches
+whole; on Linux it enrolls every directory, reading their entries' types
+without stat'ing them.
+
+`Precise` reports what changed instead, file by file: `mygo.FileCreate`,
+`FileWrite`, `FileRemove` or `FileRename`, with `OldPath` where a rename
+moved from. For that the watch keeps a snapshot of every file and
+directory, which it stats when it starts and compares with what it sees
+after each change, so its cost grows with the tree: on a 524,285-entry
+tree, seconds and about 300 MB. Use it where which file changed matters,
+such as a file tree, an index or sync. A precise watch's events say what
+is different, not every step that made it so: treat them as hints to read
+the files again. A write is a file whose size or modification time
 changed, or that the system says was written: permissions and other
 metadata, which indexers and antivirus touch, are not reported, nor are
-directories written, whose changes are their entries'.
+directories written, whose changes are their entries'. After the system
+lost changes, it lists every directory again, so nothing is lost.
 
-A watch doesn't look again until `Next` has taken the last batch: when the
-app is busy, what changed meanwhile comes in the next batch, so nothing is
-lost and nothing piles up. What the watch can't look at, such as a
-directory without permission, is left out rather than ending it.
-`Ignore` leaves out files and directories by
-their path: a directory it ignores is never opened, and doesn't count in
-`MaxEntries`.
+What is already there is not reported. Changes wait for 50 ms of quiet
+(`Debounce`, right away when negative) before they are reported, and never
+more than 500 ms (`MaxDelay`). A watch doesn't look again until `Next` has
+taken the last batch: when the app is busy, what changed meanwhile comes
+in the next batch, so nothing is lost and nothing piles up. What the watch
+can't look at, such as a directory without permission, is left out rather
+than ending it. `Ignore` leaves out directories, and with `Precise` files,
+by their path: a directory it ignores is never opened, and doesn't count
+in `MaxEntries`. Without `Precise`, a change to a file it would ignore
+still hints at the file's directory.
 
 A file is watched through its directory, as [fsnotify](https://github.com/fsnotify/fsnotify)
-recommends: a file replaced, as editors save, is a write of `.`, one
-removed a removal, and one that appears again a creation. When the
-directory itself, or the directory of the file, is removed, renamed or
-replaced, the last batch has a `FileRemove` of `.`, and `Next` then returns
-`io.EOF`.
+recommends: a change to it is a hint of `.`, and with `Precise` a file
+replaced, as editors save, is a write of `.`, one removed a removal, and
+one that appears again a creation. When the directory itself, or the
+directory of the file, is removed, renamed or replaced, the last batch has
+a `FileRemove` of `.`, and `Next` then returns `io.EOF`. Symlinks are never
+followed, and nothing outside the watched directory is opened.
 
 `Close`, or canceling the context given to `WatchFiles`, stops the watch:
 `Next` returns `io.EOF`, and `Done` is closed once it has released its
 handles. The app stops its watches when it quits. A watch stops with
-`mygo.ErrWatchLimit` when its directory has more than `MaxEntries` files
-and directories: 65536 on macOS, where one FSEvents stream covers the
-whole tree, and 8192 elsewhere, where a backend may take a handle per
-entry. The [watch plugin](plugins/watch.md) gives
-pages watches of the directories and files an app chooses, and says how
-each platform watches.
-
-`HintsOnly` trades all of that precision for cost. The watch keeps no
-snapshot and stats no file: it reports only `mygo.FileHint` events, each
-naming a directory in or under which the system said something changed,
-and `.` after the system lost changes. Which file changed, how, and whether
-it was renamed are never known. It suits a dev reloader, which rebuilds on
-any change:
-
-```go
-w, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{
-	Recursive: true,
-	HintsOnly: true, // only "something under this directory changed"
-	Ignore: func(p string, isDir bool) bool {
-		return isDir && path.Base(p) == "node_modules"
-	},
-})
-```
-
-Never use it where the file matters: following a document, syncing, or
-anything that would act on a path it can't know. With it, `Ignore` is asked
-about directories only (a change to a file it would ignore still hints at
-the file's directory), and `MaxEntries` counts the directories enrolled. On
-macOS and Windows a recursive hints-only watch enrolls only its directory,
-which the system watches whole; on Linux it enrolls every directory,
-reading their entries' types without stat'ing them. Symlinks are still not
-followed, nothing outside the directory is watched, and the watched
-directory going away still ends the watch with a `FileRemove` of `.`.
+`mygo.ErrWatchLimit` when it has more than `MaxEntries` directories to
+enroll, or with `Precise` files and directories to keep: 65536 on macOS,
+where one FSEvents stream covers the whole tree, and 8192 elsewhere, where
+a backend may take a handle per directory. The [watch plugin](plugins/watch.md)
+gives pages precise watches of the directories and files an app chooses,
+and says how each platform watches.
 
 ## Global shortcuts
 

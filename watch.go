@@ -16,30 +16,34 @@ import (
 type FileOp string
 
 const (
-	// FileCreate is a file or directory that appeared.
+	// FileHint says only that something in or under the directory at
+	// Path changed, or the watched file itself: which file, and how, is
+	// unknown. It is all a watch reports, but a FileRemove of "." when
+	// its directory goes away, unless FileWatchOptions.Precise.
+	FileHint FileOp = "hint"
+	// FileCreate is a file or directory that appeared (Precise).
 	FileCreate FileOp = "create"
 	// FileWrite is a file whose content may have changed: its size or
 	// modification time changed, or the system said it was written.
 	// Changes of permissions and other metadata are not reported, nor
-	// are directories written, whose changes are their entries'.
+	// are directories written, whose changes are their entries'
+	// (Precise).
 	FileWrite FileOp = "write"
-	// FileRemove is a file or directory that went away.
+	// FileRemove is a file or directory that went away (Precise), or the
+	// watched directory, or the directory of the watched file, which ends
+	// any watch.
 	FileRemove FileOp = "remove"
 	// FileRename is a file or directory that moved within the watched
-	// directory.
+	// directory (Precise).
 	FileRename FileOp = "rename"
-	// FileHint says only that something in or under the directory at
-	// Path changed: which file, and how, is unknown. A watch with
-	// FileWatchOptions.HintsOnly reports nothing else, but a FileRemove
-	// of "." when its directory goes away.
-	FileHint FileOp = "hint"
 )
 
-// FileEvent is a change in a watched file or directory. A watch compares
-// what it sees with what it saw before, so events say what is different,
-// not every step that made it so: a file written twice in a row is one
-// write, and one created and removed in between is nothing. Treat them as
-// hints to read the files again.
+// FileEvent is a change in a watched file or directory. A watch reports
+// FileHint events, which say where to look; one with
+// FileWatchOptions.Precise compares what it sees with what it saw before,
+// so its events say what is different, not every step that made it so: a
+// file written twice in a row is one write, and one created and removed
+// in between is nothing. Treat either as hints to read the files again.
 type FileEvent struct {
 	Op FileOp `json:"op"`
 	// Path is the path relative to the watched directory, separated by
@@ -53,17 +57,20 @@ type FileEvent struct {
 }
 
 // FileWatchOptions configures WatchFiles. The zero value watches a file,
-// or a directory without the directories in it.
+// or a directory without the directories in it, and reports FileHint
+// events only.
 type FileWatchOptions struct {
 	// Recursive watches the directories in the directory too.
 	Recursive bool
-	// Ignore, when set, is asked about every file and directory the
-	// watch finds, by its path relative to the watched directory,
-	// separated by slashes, and whether it is a directory. What it
-	// ignores is not watched, reported or counted in MaxEntries, nor is
-	// anything in a directory it ignores, which is never opened: return
-	// true for node_modules and .git. It runs on a goroutine of the
-	// watch, and must be quick.
+	// Ignore, when set, is asked about the directories the watch finds,
+	// and with Precise about every file too, by its path relative to the
+	// watched directory, separated by slashes, and whether it is a
+	// directory. What it ignores is not watched, reported or counted in
+	// MaxEntries, nor is anything in a directory it ignores, which is
+	// never opened: return true for node_modules and .git. Without
+	// Precise a change to a file it would ignore still hints at the
+	// file's directory. It runs on a goroutine of the watch, and must be
+	// quick.
 	Ignore func(path string, isDir bool) bool
 	// Debounce is how long a watch waits for changes to stop before it
 	// reports them: 50 ms when zero, right away when negative.
@@ -71,28 +78,29 @@ type FileWatchOptions struct {
 	// MaxDelay is the longest changes wait while more keep coming: 500 ms
 	// when zero, and never less than Debounce.
 	MaxDelay time.Duration
-	// MaxEntries is how many files and directories a watch keeps a
-	// snapshot of before it stops with ErrWatchLimit: 65536 on macOS,
-	// where a watch covers a whole tree with one stream, and 8192
-	// elsewhere, where a backend may take a handle per entry, when zero.
-	// With HintsOnly it counts the directories the watch enrolls.
+	// MaxEntries is how many directories a watch enrolls, and with
+	// Precise how many files and directories it keeps a snapshot of,
+	// before it stops with ErrWatchLimit: 65536 on macOS, where a watch
+	// covers a whole tree with one stream, and 8192 elsewhere, where a
+	// backend may take a handle per directory, when zero.
 	MaxEntries int
-	// HintsOnly makes the watch cheap and coarse: it keeps no snapshot of
-	// the tree and stats no file, so it reports only FileHint events that
-	// name a directory in or under which the system said something
-	// changed, never which file, how, or that it was renamed. After the
-	// system lost changes it hints "." (look at everything). It suits a
-	// dev reloader, which rebuilds whatever changed; never use it where
-	// what changed matters, such as following a document's file.
+	// Precise makes the watch report what changed: FileCreate, FileWrite,
+	// FileRemove and FileRename with the old path, file by file, rather
+	// than FileHint for the directory where something did. For that it
+	// keeps a snapshot of every file and directory, which it stats when
+	// it starts and compares what it sees again with after each change:
+	// its cost grows with the tree (on a 524,285-entry tree, seconds and
+	// ~300 MB), and after the system lost changes it lists every
+	// directory again rather than hinting ".". Use it where which file
+	// changed matters, such as a file tree, an index or sync; a dev
+	// reloader that rebuilds on any change doesn't need it.
 	//
-	// It still doesn't follow symlinks and doesn't leave the directory.
-	// Ignore is asked only about directories: what is in one it ignores
-	// is not watched or hinted, but a change to a file it would ignore
-	// still hints at that file's directory. On macOS and Windows a
-	// recursive watch enrolls only its directory, which the system
-	// watches as a tree; on Linux it enrolls every directory, without
-	// stat'ing what is in them.
-	HintsOnly bool
+	// Without it a watch keeps no snapshot and stats no file. On macOS
+	// and Windows a recursive watch enrolls only its directory, which the
+	// system watches whole; on Linux it enrolls every directory, without
+	// stat'ing what is in them. Either way it doesn't follow symlinks or
+	// leave the directory.
+	Precise bool
 }
 
 // ErrWatchLimit is what a watch stops with when its directory has more
@@ -144,11 +152,12 @@ var fileWatches = struct {
 // is already there is not reported. Canceling ctx stops the watch, as
 // Close does.
 //
-// A file is watched through its directory, so that a file replaced, as
-// editors save, is reported as written, one removed as removed, and one
-// that appears again as created. When the directory itself (or the
-// directory of the file) is removed, renamed or replaced, the watch
-// reports a FileRemove of "." and ends: Next returns io.EOF.
+// A file is watched through its directory, so that a change to it, even
+// a replacement, as editors save, is a FileHint of "."; with
+// opts.Precise a file replaced is reported as written, one removed as
+// removed, and one that appears again as created. When the directory
+// itself (or the directory of the file) is removed, renamed or replaced,
+// the watch reports a FileRemove of "." and ends: Next returns io.EOF.
 //
 // It can be called from any goroutine, and on the main thread once the app
 // runs. The app stops its watches when it quits.
@@ -417,9 +426,9 @@ func stopFileWatches() {
 func (w *FileWatcher) run(ready chan error) {
 	var terminal error
 	discard := true
-	var scan fileWatchLooker = newFileWatchScan(w)
-	if w.opts.HintsOnly {
-		scan = newFileWatchHints(w)
+	var scan fileWatchLooker = newFileWatchHints(w)
+	if w.opts.Precise {
+		scan = newFileWatchScan(w)
 	}
 	defer func() {
 		w.stop(terminal, discard)
