@@ -751,7 +751,18 @@ func (r *Renderer) effectPipeline(e *scene.Effect) id {
 		src, fn = e.Metal.Source, "shader_ps" // ShaderSource's
 	}
 	var lib id
-	if len(e.Metal.Compiled) > 0 && e.Metal.Sum == gpu.SourceSum(src) {
+	if e.Shader != nil {
+		// Made as the shader compiled (PrecompileShader).
+		if shared, pipe, ok := sharedShader(r.device, src, f.format); ok {
+			if pipe != 0 {
+				release(&shared)
+				p.pipe = pipe
+				return p.pipe
+			}
+			lib = shared
+		}
+	}
+	if lib == 0 && len(e.Metal.Compiled) > 0 && e.Metal.Sum == gpu.SourceSum(src) {
 		lib = r.libraryFromData(e.Metal.Compiled)
 	}
 	if lib == 0 {

@@ -237,10 +237,14 @@ box.Draw(func(p *ui.Painter, r ui.Rect) {
 `Compile` reports what is wrong with a shader with its lines; compile
 shaders once, as package variables with `MustCompile`. `Compile` takes
 about a millisecond: it checks the shader and translates it into the
-GPU's language (Metal, HLSL or GLSL), and the GPU's driver compiles that
-when a window first draws the shader, which delays that frame. On macOS,
-that is about 100 ms, the first time the app runs on the Mac; Metal keeps
-what it compiled on disk, so later launches draw at once. Linux's Mesa
+GPU's language (Metal, HLSL or GLSL), which the GPU's driver then
+compiles, as SwiftUI's `Shader.compile(as:)` has it done ahead of use.
+On macOS, `Compile` starts that on a goroutine of its own: Metal's
+library and pipeline take about 0.2 s together the first time the app
+runs on the Mac, and the renderers of every window draw with them,
+waiting only for what is left; a shader compiled as a package variable
+is ready long before its first frame, and Metal keeps both on disk, so
+later launches have them at once. Linux's Mesa
 drivers keep theirs on disk too (in `~/.cache/mesa_shader_cache`): from
 a tenth to a third of a second on the CPU's llvmpipe, the first time,
 and a few milliseconds after. On Windows, Direct3D's compiler takes from
