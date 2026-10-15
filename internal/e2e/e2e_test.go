@@ -2426,6 +2426,11 @@ func TestClick(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
 	w.Page().LoadHTML(`<body style="margin:0"><button id="b" style="width:200px;height:100px" onclick="window.clicked=(window.clicked||0)+1">x</button></body>`, "")
 	waitFor(t, w, "document.getElementById('b')")
+	// A user clicks the window of the app in front. A click in a window
+	// that is not key yet, or of an app another app took the foreground
+	// from, is a first click, which WebKit does not give the page.
+	w.Focus()
+	eventually(t, "the window focused", w.IsFocused)
 	if !click(w, 50, 50) {
 		t.Skip("click automation not available on this platform")
 	}
@@ -2436,6 +2441,8 @@ func TestClick(t *testing.T) {
 	f := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, Frameless: true})
 	f.Page().LoadHTML(`<body style="margin:0"><div id="bar" style="--app-region:drag;height:40px" onmousedown="window.pressed=true"></div></body>`, "")
 	waitFor(t, f, "document.getElementById('bar')")
+	f.Focus()
+	eventually(t, "the frameless window focused", f.IsFocused)
 	click(f, 100, 20)
 	waitFor(t, f, "window.pressed === true")
 	if !f.IsVisible() {
