@@ -2918,7 +2918,13 @@ either.
   in `%LOCALAPPDATA%\MyGo\ShaderCache`, a file named by the SHA-256 of
   what it compiled from, one directory for the user as Windows' own
   D3DSCache is, the least recently used removed beyond 32 MB. Effects
-  compiled ahead of time, and apps without shaders, do not link it.
+  compiled ahead of time, and apps without shaders, do not link it. On
+  macOS, `metal.PrecompileShader` does the same with the system's default
+  device: Metal's library (about 85 ms the first time) and the pipeline
+  for BGRA8 windows (about 60 ms), which renderers on that device retain
+  (`sharedShader`) in place of making them; Metal's own disk cache keeps
+  them for later launches, and wide-gamut windows make their pipeline
+  from the shared library.
 - **Corners.** On macOS, rounded corners are continuous, as AppKit's and
   SwiftUI's (`scene.Op.Continuous`), and drawn as Core Animation draws
   them on screen, with the function of its shaders (QuartzCore's
