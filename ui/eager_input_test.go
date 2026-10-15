@@ -1,6 +1,11 @@
 package ui
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+
+	"github.com/egoist/mygo/internal/platform"
+)
 
 // TestInputReachesLocalCopies: a control's input reaches what it binds as
 // its constructor returns, so a local copy compared with the value it
@@ -156,6 +161,47 @@ func TestListChangedInSplit(t *testing.T) {
 			if sel != 1 || changed != 1 {
 				t.Errorf("%s, %s: chose %d, Changed %d times", place, form, sel, changed)
 			}
+		}
+	}
+}
+
+// TestListClickThenTypeInOneFrame clicks a row and types the first letters
+// of another before the window draws a frame, as macOS delivers them: the
+// click is the rows', queued first, so it applies before the list takes
+// the typing, in both of List's forms.
+func TestListClickThenTypeInOneFrame(t *testing.T) {
+	words := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
+	label := func(i int) string { return fmt.Sprintf("%s %d", words[i%len(words)], i) }
+	for _, form := range []string{"row", "Rows"} {
+		chosen := -1
+		s := ListState{Selected: &chosen, Label: label}
+		tt := NewTester(func(c *Context) {
+			if form == "row" {
+				List(c, &s, 100, func(i int) { Text(c, label(i)).Padding(6, 10) }).Fill()
+			} else {
+				List(c, &s, 100).Fill().Rows(func(r ListRow) { Text(r.Context, label(r.Index)).Padding(6, 10) })
+			}
+		}, 300, 300)
+		r, ok := tt.Find("alpha 0")
+		if !ok {
+			t.Fatal("no row alpha 0")
+		}
+		x, y := float64(r.X+r.W/2), float64(r.Y+r.H/2)
+		events := []platform.SurfaceEvent{
+			{Kind: platform.PointerDown, X: x, Y: y, Clicks: 1},
+			{Kind: platform.PointerUp, X: x, Y: y, Clicks: 1},
+		}
+		for _, k := range []Key{KeyH, KeyO, KeyT} {
+			events = append(events,
+				platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(k)},
+				platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(k)})
+		}
+		for _, ev := range events {
+			tt.rt.event(ev)
+		}
+		tt.settle()
+		if chosen != 7 {
+			t.Errorf("%s: clicking alpha 0 and typing hot chose %d, want 7 (hotel 7)", form, chosen)
 		}
 	}
 }
