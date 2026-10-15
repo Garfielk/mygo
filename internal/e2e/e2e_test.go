@@ -2371,23 +2371,15 @@ func TestJavaScriptAlert(t *testing.T) {
 		_, err := w.Page().Eval("setTimeout(() => { alert('hello'); window.alertDone = true }, 0)")
 		evaluated <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if ok, _ := endSheet(w); ok {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("alert sheet never appeared")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	select {
-	case err := <-evaluated:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(wait.Guard):
-		t.Fatal("Eval did not return after the alert was dismissed")
+	// The sheet takes a while: beginSheetModalForWindow: animates it in
+	// before it returns, and the main thread runs nothing else meanwhile.
+	eventually(t, "the alert sheet", func() bool {
+		ok, _ := endSheet(w)
+		return ok
+	})
+	eventually(t, "the Eval to return after the alert was dismissed", func() bool { return len(evaluated) > 0 })
+	if err := <-evaluated; err != nil {
+		t.Fatal(err)
 	}
 	waitFor(t, w, "window.alertDone")
 }
