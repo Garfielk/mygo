@@ -18,6 +18,10 @@ func TestVetUICgo(t *testing.T) {
 		t.Skip("cgo is disabled")
 	} else if _, err := exec.LookPath(env[1]); err != nil {
 		t.Skip("no C compiler")
+	} else if out, err := exec.Command("go", "build", "runtime/cgo").CombinedOutput(); err != nil {
+		// A compiler for another architecture, as the x64 GCC of a
+		// Windows ARM64 runner, can't build cgo.
+		t.Skipf("cgo does not build: %v\n%s", err, out)
 	}
 	answer := "package main\n\n// int answer(void) { return 42; }\nimport \"C\"\n\nfunc answer() int { return int(C.answer()) }\n"
 	for _, tt := range []struct {
