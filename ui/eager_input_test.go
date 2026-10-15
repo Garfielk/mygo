@@ -117,3 +117,45 @@ func TestInputReachesLocalCopiesOfParts(t *testing.T) {
 		t.Errorf("after choosing Size L, size %q", size)
 	}
 }
+
+// TestListChangedInSplit: List is a constructor too, in both its forms, so
+// a click is Changed as it returns, also in a split's pane, whose
+// constructor is still building (#364).
+func TestListChangedInSplit(t *testing.T) {
+	rows := []string{"row 0", "row 1", "row 2"}
+	for _, place := range []string{"column", "SplitVertical", "Split"} {
+		for _, form := range []string{"row", "Rows"} {
+			sel := -1
+			s := ListState{Selected: &sel}
+			changed := 0
+			list := func(c *Context) {
+				var l Element
+				if form == "row" {
+					l = List(c, &s, len(rows), func(i int) { Text(c, rows[i]) })
+				} else {
+					l = List(c, &s, len(rows)).Rows(func(r ListRow) { Text(r.Context, rows[r.Index]) })
+				}
+				if l.Grow(1).Changed() {
+					changed++
+				}
+			}
+			tt := NewTester(func(c *Context) {
+				size := float32(60)
+				switch place {
+				case "column":
+					Column(c).Grow(1).Children(func() { list(c) })
+				case "SplitVertical":
+					SplitVertical(c, &size, func() { list(c) }, func() { Text(c, "other") }).Grow(1)
+				case "Split":
+					Split(c, &size, func() { Text(c, "other") }, func() { list(c) }).Grow(1)
+				}
+			}, 300, 300)
+			if err := tt.Click("row 1"); err != nil {
+				t.Fatal(err)
+			}
+			if sel != 1 || changed != 1 {
+				t.Errorf("%s, %s: chose %d, Changed %d times", place, form, sel, changed)
+			}
+		}
+	}
+}
