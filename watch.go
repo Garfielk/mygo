@@ -28,6 +28,11 @@ const (
 	// FileRename is a file or directory that moved within the watched
 	// directory.
 	FileRename FileOp = "rename"
+	// FileHint says only that something in or under the directory at
+	// Path changed: which file, and how, is unknown. A watch with
+	// FileWatchOptions.HintsOnly reports nothing else, but a FileRemove
+	// of "." when its directory goes away.
+	FileHint FileOp = "hint"
 )
 
 // FileEvent is a change in a watched file or directory. A watch compares
@@ -70,7 +75,24 @@ type FileWatchOptions struct {
 	// snapshot of before it stops with ErrWatchLimit: 65536 on macOS,
 	// where a watch covers a whole tree with one stream, and 8192
 	// elsewhere, where a backend may take a handle per entry, when zero.
+	// With HintsOnly it counts the directories the watch enrolls.
 	MaxEntries int
+	// HintsOnly makes the watch cheap and coarse: it keeps no snapshot of
+	// the tree and stats no file, so it reports only FileHint events that
+	// name a directory in or under which the system said something
+	// changed, never which file, how, or that it was renamed. After the
+	// system lost changes it hints "." (look at everything). It suits a
+	// dev reloader, which rebuilds whatever changed; never use it where
+	// what changed matters, such as following a document's file.
+	//
+	// It still doesn't follow symlinks and doesn't leave the directory.
+	// Ignore is asked only about directories: what is in one it ignores
+	// is not watched or hinted, but a change to a file it would ignore
+	// still hints at that file's directory. On macOS and Windows a
+	// recursive watch enrolls only its directory, which the system
+	// watches as a tree; on Linux it enrolls every directory, without
+	// stat'ing what is in them.
+	HintsOnly bool
 }
 
 // ErrWatchLimit is what a watch stops with when its directory has more
@@ -395,7 +417,10 @@ func stopFileWatches() {
 func (w *FileWatcher) run(ready chan error) {
 	var terminal error
 	discard := true
-	scan := newFileWatchScan(w)
+	var scan fileWatchLooker = newFileWatchScan(w)
+	if w.opts.HintsOnly {
+		scan = newFileWatchHints(w)
+	}
 	defer func() {
 		w.stop(terminal, discard)
 		scan.close()
@@ -460,7 +485,7 @@ func (w *FileWatcher) run(ready chan error) {
 		case <-w.ctx.Done():
 			return
 		case <-w.overflow:
-			scan.all = true
+			scan.lookAll()
 			schedule()
 		case <-w.spilled:
 			for _, n := range w.unspill() {

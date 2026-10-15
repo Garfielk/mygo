@@ -1667,6 +1667,20 @@ type, before an entry is enrolled, so an ignored directory is never opened;
 the directories it ignored are kept per listed directory, so that the
 notices of a `Subtree` target about what is in them are dropped.
 
+`HintsOnly` swaps the scan for `fileWatchHints` (`watch_hints.go`), behind
+the same `fileWatchLooker` the watch's goroutine drives: no snapshot, only
+the directories it enrolls. A notice naming an entry hints at the
+directory holding it; one naming an enrolled directory, or the directory
+itself, has the next update check that it is still what was enrolled and,
+if not (moved, removed, replaced), drop the targets under it; a name that
+may be a new directory is enrolled with what is beneath it. An overflow
+hints at `.` and enrolls the tree again. Hints under one another collapse
+into the shallowest. On Linux the directories are listed with `getdents`
+types (`watch_hints_linux.go`), as notify walks them, so files are never
+stat'ed; elsewhere a recursive watch is the root's `Subtree` target alone.
+It is opt-in because it gives up what the snapshot is for: exact events,
+renames, writes told from metadata, and which file.
+
 An entry the scan can't look at, a directory without permission or a
 file Windows holds (`pagefile.sys`, a sharing violation), is left as it
 was seen, if at all, and what is in it unwatched, rather than ending the

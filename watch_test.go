@@ -1204,3 +1204,179 @@ func BenchmarkFileWatchScan(b *testing.B) {
 		b.ReportMetric(float64(len(s.entries)), "entries")
 	})
 }
+
+// fileWatchTestHints returns the next batch, which must hold only hints.
+func fileWatchTestHints(t *testing.T, w *FileWatcher) []string {
+	t.Helper()
+	var paths []string
+	for _, e := range fileWatchTestBatch(t, w) {
+		if e.Op != FileHint || !e.IsDir || e.OldPath != "" {
+			t.Fatalf("a hints-only watch reported %+v", e)
+		}
+		paths = append(paths, e.Path)
+	}
+	return paths
+}
+
+// A hints-only watch enrolls directories, keeps no snapshot and says only
+// in which directory something changed.
+func TestFileWatchHintsOnly(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"a/b", "node_modules/pkg"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(p)), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "f"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ignore := func(p string, isDir bool) bool { return p == "node_modules" }
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, HintsOnly: true, Ignore: ignore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	native := w.native.(*fake.FileWatch)
+	enrolled := func() []string {
+		var paths []string
+		for _, target := range native.Targets() {
+			if !target.Directory {
+				t.Errorf("file %s enrolled", target.Path)
+			}
+			if rel, err := filepath.Rel(w.root, target.Path); err == nil && !strings.HasPrefix(rel, "..") {
+				paths = append(paths, filepath.ToSlash(rel))
+			}
+		}
+		slices.Sort(paths)
+		return paths
+	}
+	if got := enrolled(); !slices.Equal(got, []string{".", "a", "a/b"}) {
+		t.Fatalf("enrolled %v", got)
+	}
+	// A write to a file hints at its directory, not at the file.
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "f"), []byte("xy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a/b", platform.FileWatchNotice{Name: "f", Kind: platform.FileWatchWrite})
+	if got := fileWatchTestHints(t, w); !slices.Equal(got, []string{"a/b"}) {
+		t.Fatalf("hints %v", got)
+	}
+	// A new directory is enrolled, and hinted at through its parent.
+	if err := os.MkdirAll(filepath.Join(dir, "a", "new", "deeper"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a", platform.FileWatchNotice{Name: "new", Kind: platform.FileWatchCreate})
+	if got := fileWatchTestHints(t, w); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("hints %v", got)
+	}
+	if got := enrolled(); !slices.Equal(got, []string{".", "a", "a/b", "a/new", "a/new/deeper"}) {
+		t.Fatalf("enrolled %v", got)
+	}
+	// A directory moved: its targets follow it.
+	if err := os.Rename(filepath.Join(dir, "a", "new"), filepath.Join(dir, "moved")); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a", platform.FileWatchNotice{Name: "new", Kind: platform.FileWatchMoveFrom})
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "moved", Kind: platform.FileWatchMoveTo})
+	// One batch or two: "." covers "a", and comes last.
+	for got := fileWatchTestHints(t, w); !slices.Equal(got, []string{"."}); got = fileWatchTestHints(t, w) {
+		if !slices.Equal(got, []string{"a"}) {
+			t.Fatalf("hints %v", got)
+		}
+	}
+	if got := enrolled(); !slices.Equal(got, []string{".", "a", "a/b", "moved", "moved/deeper"}) {
+		t.Fatalf("enrolled %v", got)
+	}
+	// Lost changes hint at everything.
+	native.Notify(platform.FileWatchNotice{Err: platform.ErrFileWatchOverflow})
+	if got := fileWatchTestHints(t, w); !slices.Equal(got, []string{"."}) {
+		t.Fatalf("hints %v", got)
+	}
+	// The directory gone ends the watch as any other.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Kind: platform.FileWatchLost})
+	if batch := fileWatchTestBatch(t, w); !slices.Equal(batch, []FileEvent{{Op: FileRemove, Path: ".", IsDir: true}}) {
+		t.Fatalf("batch %+v", batch)
+	}
+	if _, err := w.Next(context.Background()); err != io.EOF {
+		t.Fatal(err)
+	}
+}
+
+// With a backend that watches a tree with one target, a hints-only watch
+// enrolls nothing else, and hints at the directory of what changed deep
+// down, but not in an ignored one.
+func TestFileWatchHintsOnlySubtree(t *testing.T) {
+	fb.FileWatchSubtree = true
+	defer func() { fb.FileWatchSubtree = false }()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ignore := func(p string, isDir bool) bool { return path.Base(p) == ".git" }
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1, HintsOnly: true, Ignore: ignore})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	for _, target := range w.native.(*fake.FileWatch).Targets() {
+		if target.Path != w.root && target.Path != filepath.Dir(w.root) {
+			t.Errorf("%s enrolled", target.Path)
+		}
+	}
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: ".git/objects/x", Kind: platform.FileWatchCreate})
+	fileWatchTestNotice(t, w, ".", platform.FileWatchNotice{Name: "a/b/f", Kind: platform.FileWatchWrite})
+	if got := fileWatchTestHints(t, w); !slices.Equal(got, []string{"a/b"}) {
+		t.Fatalf("hints %v", got)
+	}
+}
+
+// A hints-only watch of a file hints at it, not at the other entries of
+// its directory.
+func TestFileWatchHintsOnlyFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(file, []byte("a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WatchFiles(context.Background(), file, FileWatchOptions{Debounce: -1, HintsOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	fileWatchTestNotice(t, w, "..", platform.FileWatchNotice{Name: "sibling", Kind: platform.FileWatchWrite})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if batch, err := w.Next(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("batch = %+v, %v", batch, err)
+	}
+	fileWatchTestNotice(t, w, "..", platform.FileWatchNotice{Name: "config.json", Kind: platform.FileWatchWrite})
+	if batch := fileWatchTestBatch(t, w); !slices.Equal(batch, []FileEvent{{Op: FileHint, Path: "."}}) {
+		t.Fatalf("batch %+v", batch)
+	}
+}
+
+// Without HintsOnly, the same change is the precise event it always was.
+func TestFileWatchHintsOnlyOptIn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "f"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := WatchFiles(context.Background(), dir, FileWatchOptions{Recursive: true, Debounce: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "f"), []byte("xy"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileWatchTestNotice(t, w, "a/b", platform.FileWatchNotice{Name: "f", Kind: platform.FileWatchWrite})
+	if batch := fileWatchTestBatch(t, w); !slices.Equal(batch, []FileEvent{{Op: FileWrite, Path: "a/b/f"}}) {
+		t.Fatalf("batch %+v", batch)
+	}
+}
