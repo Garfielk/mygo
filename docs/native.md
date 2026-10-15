@@ -418,6 +418,7 @@ goroutine of its own:
 ```go
 w, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{
 	Recursive: true,
+	Precise:   false, // the default: where something changed, not what
 	Ignore: func(p string, isDir bool) bool {
 		return isDir && (path.Base(p) == "node_modules" || path.Base(p) == ".git")
 	},
@@ -454,9 +455,28 @@ moved from. For that the watch keeps a snapshot of every file and
 directory, which it stats when it starts and compares with what it sees
 after each change, so its cost grows with the tree: on a 524,285-entry
 tree, seconds and about 300 MB. Use it where which file changed matters,
-such as a file tree, an index or sync. A precise watch's events say what
-is different, not every step that made it so: treat them as hints to read
-the files again. A write is a file whose size or modification time
+such as a file tree, an index or sync:
+
+```go
+w, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{
+	Recursive: true,
+	Precise:   true, // what changed, file by file, for a snapshot of the tree
+})
+// ...
+for _, e := range events {
+	switch e.Op {
+	case mygo.FileCreate, mygo.FileWrite:
+		reload(e.Path)
+	case mygo.FileRemove:
+		forget(e.Path)
+	case mygo.FileRename:
+		move(e.OldPath, e.Path)
+	}
+}
+```
+
+A precise watch's events say what is different, not every step that made
+it so: treat them as hints to read the files again. A write is a file whose size or modification time
 changed, or that the system says was written: permissions and other
 metadata, which indexers and antivirus touch, are not reported, nor are
 directories written, whose changes are their entries'. After the system
