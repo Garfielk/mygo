@@ -563,7 +563,7 @@ func TestFileWatchDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := fileWatchDiff(old, map[string]fileWatchEntry{"b": fileWatchEntryOf(info)}, map[string]bool{"a": true})
+	events := fileWatchTestDiff(old, map[string]fileWatchEntry{"b": fileWatchEntryOf(info)}, map[string]bool{"a": true})
 	if len(events) != 2 || events[0].Op != FileRename || events[0].OldPath != "a" || events[1].Op != FileWrite {
 		t.Fatalf("%+v", events)
 	}
@@ -661,7 +661,8 @@ func TestFileWatchDiffPairing(t *testing.T) {
 	paired := 0
 	for i := range 5000 {
 		before, after := pick(), pick()
-		ids := newFileWatchIDs(before, after)
+		changed, _ := fileWatchTestChanged(before, after)
+		ids := newFileWatchIDs(changed, after)
 		for old, a := range before {
 			want, count := "", 0
 			for p, b := range after {
@@ -692,6 +693,28 @@ func TestFileWatchDiffPairing(t *testing.T) {
 	if paired == 0 {
 		t.Fatal("nothing paired")
 	}
+}
+
+// fileWatchTestChanged is what an update that found before as after
+// looked at: every path of either.
+func fileWatchTestChanged(before, after map[string]fileWatchEntry) (map[string]fileWatchBefore, map[string]fileWatchEntry) {
+	changed := map[string]fileWatchBefore{}
+	for p, e := range before {
+		changed[p] = fileWatchBefore{e, true}
+	}
+	for p := range after {
+		if _, ok := changed[p]; !ok {
+			changed[p] = fileWatchBefore{}
+		}
+	}
+	return changed, after
+}
+
+// fileWatchTestDiff is fileWatchDiff of an update that found before as
+// after.
+func fileWatchTestDiff(before, after map[string]fileWatchEntry, writes map[string]bool) []FileEvent {
+	changed, entries := fileWatchTestChanged(before, after)
+	return fileWatchDiff(changed, entries, writes)
 }
 
 func fileWatchTestNames(m map[string]fileWatchEntry) map[string]uint64 {
@@ -727,8 +750,9 @@ func BenchmarkFileWatchDiffRename(b *testing.B) {
 				b.Fatal(err)
 			}
 			before["a"], after["b"] = fileWatchEntryOf(info), fileWatchEntryOf(info)
+			changed, _ := fileWatchTestChanged(before, after)
 			for b.Loop() {
-				if events := fileWatchDiff(before, after, nil); len(events) != 1 || events[0].Op != FileRename {
+				if events := fileWatchDiff(changed, after, nil); len(events) != 1 || events[0].Op != FileRename {
 					b.Fatal(events)
 				}
 			}
@@ -1196,6 +1220,10 @@ func BenchmarkFileWatchScan(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	// Like the system backends, which watch files through their
+	// directories.
+	fb.FileWatchNoFiles = true
+	defer func() { fb.FileWatchNoFiles = false }()
 	start := func(b *testing.B) (*fileWatchScan, func()) {
 		native, err := backend().NewFileWatch(func(platform.FileWatchNotice) {})
 		if err != nil {

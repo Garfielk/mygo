@@ -461,19 +461,9 @@ func (s *fileWatchScan) events() []FileEvent {
 			s.touch(p)
 		}
 	}
-	before := make(map[string]fileWatchEntry, len(s.before))
-	after := make(map[string]fileWatchEntry, len(s.before))
-	for p, b := range s.before {
-		if b.ok {
-			before[p] = b.entry
-		}
-		if e, ok := s.entries[p]; ok {
-			after[p] = e
-		}
-	}
-	events := fileWatchDiff(before, after, writes)
-	a, aok := before["."]
-	if b, bok := after["."]; s.file && aok && bok && !a.isDir() && !b.isDir() && a.id != b.id {
+	events := fileWatchDiff(s.before, s.entries, writes)
+	a := s.before["."]
+	if b, ok := s.entries["."]; s.file && a.ok && ok && !a.entry.isDir() && !b.isDir() && a.entry.id != b.id {
 		// A file replaced, as editors save, is written.
 		events = []FileEvent{{Op: FileWrite, Path: "."}}
 	}
@@ -976,20 +966,20 @@ func (s *fileWatchScan) unenroll(p string) {
 	}
 }
 
-// fileWatchDiff turns what an update changed, as it was before and is
-// after, into events. An entry whose identity moved to another path is a
-// rename, when nothing else has that identity.
-func fileWatchDiff(before, after map[string]fileWatchEntry, writes map[string]bool) []FileEvent {
+// fileWatchDiff turns what an update changed into events: changed holds
+// what it looked at as it was before, entries what is now. An entry whose
+// identity moved to another path is a rename, when nothing else has that
+// identity.
+func fileWatchDiff(changed map[string]fileWatchBefore, entries map[string]fileWatchEntry, writes map[string]bool) []FileEvent {
 	removed := make(map[string]fileWatchEntry)
 	created := make(map[string]fileWatchEntry)
-	for p, a := range before {
-		if b, ok := after[p]; !ok || a.id != b.id {
-			removed[p] = a
+	for p, was := range changed {
+		now, ok := entries[p]
+		if was.ok && (!ok || was.entry.id != now.id) {
+			removed[p] = was.entry
 		}
-	}
-	for p, b := range after {
-		if a, ok := before[p]; !ok || a.id != b.id {
-			created[p] = b
+		if ok && (!was.ok || was.entry.id != now.id) {
+			created[p] = now
 		}
 	}
 	type group struct {
@@ -1008,7 +998,7 @@ func fileWatchDiff(before, after map[string]fileWatchEntry, writes map[string]bo
 	// comparisons.
 	var ids *fileWatchIDs
 	if len(removed) > 0 && len(created) > 0 {
-		ids = newFileWatchIDs(before, after)
+		ids = newFileWatchIDs(changed, entries)
 	}
 	for _, old := range keys {
 		a := removed[old]
@@ -1028,10 +1018,10 @@ func fileWatchDiff(before, after map[string]fileWatchEntry, writes map[string]bo
 		}
 		// A replacement is a removal and a creation even if the old name
 		// survives elsewhere.
-		if _, exists := after[old]; exists {
+		if _, exists := entries[old]; exists {
 			continue
 		}
-		if _, exists := before[match]; exists {
+		if changed[match].ok {
 			continue
 		}
 		// Moved with a directory renamed above it, which says it all.
@@ -1055,14 +1045,7 @@ func fileWatchDiff(before, after map[string]fileWatchEntry, writes map[string]bo
 		}
 		groups = append(groups, group{match, events})
 	}
-	paths := make(map[string]bool)
-	for p := range before {
-		paths[p] = true
-	}
-	for p := range after {
-		paths[p] = true
-	}
-	for p := range paths {
+	for p, was := range changed {
 		var events []FileEvent
 		if a, ok := removed[p]; ok {
 			events = append(events, FileEvent{Op: FileRemove, Path: p, IsDir: a.isDir()})
@@ -1070,9 +1053,7 @@ func fileWatchDiff(before, after map[string]fileWatchEntry, writes map[string]bo
 		if b, ok := created[p]; ok {
 			events = append(events, FileEvent{Op: FileCreate, Path: p, IsDir: b.isDir()})
 		}
-		a, aok := before[p]
-		b, bok := after[p]
-		if aok && bok && !b.isDir() && a.id == b.id && (writes[p] || fileWatchChanged(a, b)) {
+		if now, ok := entries[p]; was.ok && ok && !now.isDir() && was.entry.id == now.id && (writes[p] || fileWatchChanged(was.entry, now)) {
 			events = append(events, FileEvent{Op: FileWrite, Path: p})
 		}
 		if len(events) > 0 {
@@ -1102,17 +1083,22 @@ type fileWatchIDSeen struct {
 	count int
 }
 
-func newFileWatchIDs(before, after map[string]fileWatchEntry) *fileWatchIDs {
-	ids := &fileWatchIDs{before: make(map[fileWatchID]fileWatchIDSeen, len(before)), after: make(map[fileWatchID]fileWatchIDSeen, len(after))}
-	for _, side := range []struct {
-		m   map[string]fileWatchEntry
-		ids map[fileWatchID]fileWatchIDSeen
-	}{{before, ids.before}, {after, ids.after}} {
-		for p, e := range side.m {
-			seen := side.ids[e.id]
-			seen.path = p
-			seen.count++
-			side.ids[e.id] = seen
+// newFileWatchIDs counts what an update looked at, as it was (changed)
+// and is (entries).
+func newFileWatchIDs(changed map[string]fileWatchBefore, entries map[string]fileWatchEntry) *fileWatchIDs {
+	ids := &fileWatchIDs{before: make(map[fileWatchID]fileWatchIDSeen, len(changed)), after: make(map[fileWatchID]fileWatchIDSeen, len(changed))}
+	count := func(m map[fileWatchID]fileWatchIDSeen, p string, id fileWatchID) {
+		seen := m[id]
+		seen.path = p
+		seen.count++
+		m[id] = seen
+	}
+	for p, was := range changed {
+		if was.ok {
+			count(ids.before, p, was.entry.id)
+		}
+		if now, ok := entries[p]; ok {
+			count(ids.after, p, now.id)
 		}
 	}
 	return ids

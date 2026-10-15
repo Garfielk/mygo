@@ -18,6 +18,12 @@ var fileStatFields struct {
 	path, vol, idxhi, idxlo int
 }
 
+// rememberFileStatType stores t, in a function of its own so that only a
+// call that stores it moves a copy of t to the heap.
+//
+//go:noinline
+func rememberFileStatType(t reflect.Type) { fileStatFields.typ.Store(&t) }
+
 // fileWatchIdentity returns the identity os.SameFile compares, the volume
 // and file index of the os package's fileStat, once it holds them: its
 // path is empty when they were read from a handle or by StatIdentity.
@@ -34,7 +40,7 @@ func fileWatchIdentity(info os.FileInfo) (fileWatchID, bool) {
 		if t.Kind() != reflect.Struct || t.Name() != "fileStat" || t.PkgPath() != "os" {
 			return fileWatchID{}, false
 		}
-		f.typ.Store(&t)
+		rememberFileStatType(t)
 	}
 	f.once.Do(func() {
 		index := func(name string, kind reflect.Kind) int {

@@ -1628,9 +1628,13 @@ constructor as `image` does: WAV is built in, `audio/vorbis` and
 
 ## Watching files (`watch.go`)
 
-`WatchFiles` keeps what it saw of its directory (`watch_scan.go`): the
-`os.FileInfo` of every file and directory, by path, read through an
-`os.Root` so that a path can't lead out of it, and symlinks not followed.
+`WatchFiles` keeps what it saw of its directory (`watch_scan.go`): for
+every file and directory, by path, a `fileWatchEntry` of 40 bytes without
+pointers (the identity `os.SameFile` compares, size, modification time and
+mode) rather than its `os.FileInfo`, whose `syscall.Stat_t` the collector
+would scan: 220 to 260 bytes an entry, with the path and its name in its
+directory's set. It is read through an `os.Root` so that a path can't lead
+out of it, and symlinks are not followed.
 Each directory is opened as an `os.Root` of its own from the one that has
 it, and what is in it is looked at by name relative to it, one call each,
 as watchman and @parcel/watcher crawl with `openat` and `fstatat`: a
