@@ -304,7 +304,7 @@ func (r *Renderer) effectProgram(e *scene.Effect) *effectProgram {
 // out as its effect says, at binding point 0, and its images to units 5
 // to 8. Unit 2 is active after.
 func (r *Renderer) bindShader(b gpu.Batch) {
-	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Shader.Uniforms)
+	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Uniforms)
 	if n := len(r.shaderBytes); n > 0 {
 		if r.ubo == 0 {
 			glGenBuffers(1, &r.ubo)

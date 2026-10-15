@@ -21,7 +21,8 @@
 // uint, float, vec2 to vec4, ivec2 to ivec4, uvec2 to uvec4, mat2 to mat4
 // and arrays of them, GLSL's built-in functions (sin, mix, smoothstep,
 // dot, ...), functions of its own, if, and for loops. Exported variables
-// at the package level are uniforms, which Options.Uniforms sets.
+// at the package level are uniforms, which Options.Uniforms sets by name,
+// or Values by variables looked up once (Shader.Uniform).
 //
 // A shader reads up to four images, bitmaps or canvases (ui.Canvas),
 // through these functions, in the images' pixels from their top left
@@ -97,8 +98,9 @@ type uniform struct {
 var bridge = []string{shader.ImageSizesUniform, shader.RectSizeUniform, shader.ScaleUniform, shader.LayerInsetUniform}
 
 const (
-	scaleWord = 2*shader.MaxImages + 2
-	insetWord = scaleWord + 1
+	scaleWord   = 2*shader.MaxImages + 2
+	insetWord   = scaleWord + 1
+	bridgeWords = insetWord + 2
 )
 
 // layerImage reads an effect's content, which its own images leave free.
@@ -197,6 +199,10 @@ type Options struct {
 	// zero, and a name the shader has not is left out. Integers set ints
 	// and uints by their low 32 bits, as Go converts them.
 	Uniforms map[string]any
+	// Values, unless nil, are values of the shader's uniform variables set
+	// by Uniform (Shader.NewValues), with no map and no conversions each
+	// frame; Uniforms then sets the variables it names over them.
+	Values *Values
 	// Images are the images image0 to image3 read: bitmaps, or canvases'
 	// (ui.Canvas.Bitmap); nil for none, which reads as transparent.
 	Images [4]*ui.Bitmap
@@ -214,7 +220,7 @@ type Options struct {
 // clipped, transformed and faded with the painter.
 func (s *Shader) Draw(p *ui.Painter, r ui.Rect, o Options) {
 	s.must(fragment)
-	p.ShaderEffect(s.fx, r, o.Radius, s.lanes(p, r, o), o.Images)
+	p.ShaderEffect(s.fx, r, o.Radius, s.input(p, r, o, ui.Point{}))
 }
 
 // Fill paints the text, paths and icons that fn paints with p with the
@@ -225,7 +231,7 @@ func (s *Shader) Draw(p *ui.Painter, r ui.Rect, o Options) {
 // and images, paints as it would. Options.Radius does not apply.
 func (s *Shader) Fill(p *ui.Painter, box ui.Rect, o Options, fn func()) {
 	s.must(fragment)
-	p.ShaderFill(s.fx, box, s.lanes(p, box, o), o.Images, fn)
+	p.ShaderFill(s.fx, box, s.input(p, box, o, ui.Point{}), fn)
 }
 
 // FillPath fills path with the shader (non-zero winding), the shader
@@ -298,12 +304,10 @@ func (fx Effect) PaintEffect(p *ui.Painter, box ui.Rect, content *ui.Bitmap, ins
 	}
 	o := fx.o
 	o.Images[shader.LayerImage] = content
-	words := fx.s.lanes(p, box, o)
-	words[insetWord], words[insetWord+1] = math.Float32bits(inset.X), math.Float32bits(inset.Y)
 	s := p.Scale()
 	w, h := content.Size()
 	area := ui.Rect{X: box.X - inset.X/s, Y: box.Y - inset.Y/s, W: float32(w) / s, H: float32(h) / s}
-	p.ShaderEffect(fx.s.fx, area, 0, words, o.Images)
+	p.ShaderEffect(fx.s.fx, area, 0, fx.s.input(p, box, o, inset))
 }
 
 // must panics unless s is a shader of kind k.
@@ -313,10 +317,24 @@ func (s *Shader) must(k kind) {
 	}
 }
 
-// lanes returns the words of the uniforms' lanes of the shader drawn with o
-// in r, the box it fills, with the bridge's first.
-func (s *Shader) lanes(p *ui.Painter, r ui.Rect, o Options) []uint32 {
-	words := make([]uint32, s.words)
+// wideColor is a color of a uniform in extended sRGB, outside sRGB.
+type wideColor struct {
+	u uniform
+	c [4]float32
+}
+
+// input returns what the shader reads drawn with o in r, the box it
+// fills, the box's corner at inset in an effect's content: the words of
+// the uniforms' lanes, the bridge's first, in the frame's words, and those
+// a wide gamut reads, when colors differ there.
+func (s *Shader) input(p *ui.Painter, r ui.Rect, o Options, inset ui.Point) ui.ShaderInput {
+	words := p.EffectWords(s.words)
+	if v := o.Values; v != nil {
+		if v.s != s {
+			panic("shader: Options.Values of another shader")
+		}
+		copy(words[bridgeWords:], v.words[bridgeWords:])
+	}
 	for i, b := range o.Images {
 		if b != nil {
 			w, h := b.Size()
@@ -325,16 +343,48 @@ func (s *Shader) lanes(p *ui.Painter, r ui.Rect, o Options) []uint32 {
 	}
 	words[scaleWord-2], words[scaleWord-1] = math.Float32bits(r.W), math.Float32bits(r.H)
 	words[scaleWord] = math.Float32bits(p.Scale())
+	words[insetWord], words[insetWord+1] = math.Float32bits(inset.X), math.Float32bits(inset.Y)
+	var mapColors []colorValue
 	for name, v := range o.Uniforms {
-		if u, ok := s.uniforms[name]; ok && name[0] != '_' {
-			kind := u.t.Scalar()
-			if u.t.Main == shaderir.Array {
-				kind = u.t.Sub[0].Scalar()
+		u, ok := s.uniforms[name]
+		if !ok || name[0] == '_' {
+			continue
+		}
+		if c, ok := v.(ui.Color); ok && (u.t.Main == shaderir.Vec3 || u.t.Main == shaderir.Vec4) {
+			mapColors = append(mapColors, colorValue{u, c})
+			continue
+		}
+		kind := u.t.Scalar()
+		if u.t.Main == shaderir.Array {
+			kind = u.t.Sub[0].Scalar()
+		}
+		set(words[u.word:u.word+u.n], kind, name, v)
+	}
+	in := ui.ShaderInput{Uniforms: words, Images: o.Images}
+	// Colors, in sRGB, and outside it, in extended sRGB, for a wide gamut.
+	var buf [8]wideColor
+	wide := buf[:0]
+	var set []colorValue
+	if o.Values != nil {
+		set = o.Values.colors
+	}
+	for _, list := range [2][]colorValue{set, mapColors} {
+		for _, cv := range list {
+			srgb, w := p.EffectColor(cv.c)
+			writeColor(words[cv.u.word:cv.u.word+cv.u.n], srgb)
+			if w != srgb {
+				wide = append(wide, wideColor{cv.u, w})
 			}
-			set(words[u.word:u.word+u.n], kind, name, v)
 		}
 	}
-	return words
+	if len(wide) > 0 {
+		in.WideUniforms = p.EffectWords(s.words)
+		copy(in.WideUniforms, words)
+		for _, x := range wide {
+			writeColor(in.WideUniforms[x.u.word:x.u.word+x.u.n], x.c)
+		}
+	}
+	return in
 }
 
 // set writes value v of uniform name into its lanes, as numbers of kind:

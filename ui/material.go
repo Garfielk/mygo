@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"slices"
 
 	"github.com/egoist/mygo/internal/scene"
 )
@@ -68,24 +69,46 @@ func (p *Painter) Effect(fx *scene.Effect, r Rect, radii [4]float32, blur float3
 	p.s.Effects = append(p.s.Effects, scene.EffectOp{Effect: fx, Blur: blur, Params: params})
 }
 
-// ShaderEffect paints the rectangle r rounded by radius, in DIPs, with fx,
-// the effect of a shader of package ui/shader (scene.Effect.Shader), which
-// reads the words of its uniforms' lanes and up to four images, bitmaps
-// or canvases' (nil for none). Only this module's packages make such
-// effects.
-func (p *Painter) ShaderEffect(fx *scene.Effect, r Rect, radius float32, uniforms []uint32, images [4]*Bitmap) {
-	if fx == nil || r.W <= 0 || r.H <= 0 {
-		return
-	}
-	op := scene.EffectOp{Effect: fx, Uniforms: uniforms}
-	for i, b := range images {
+// ShaderInput is what the effect of a shader of package ui/shader reads:
+// the words of its uniforms' lanes, the words a wide gamut reads in their
+// place (nil when the same), from EffectWords, and up to four images,
+// bitmaps or canvases' (nil for none).
+type ShaderInput struct {
+	Uniforms, WideUniforms []uint32
+	Images                 [4]*Bitmap
+}
+
+// op returns the effect op of fx reading in.
+func (in *ShaderInput) op(fx *scene.Effect) scene.EffectOp {
+	op := scene.EffectOp{Effect: fx, Uniforms: in.Uniforms, WideUniforms: in.WideUniforms}
+	for i, b := range in.Images {
 		if b != nil {
 			op.Images[i] = b.img
 		}
 	}
+	return op
+}
+
+// EffectWords returns n words, zero, for the uniforms of an effect this
+// frame paints (ShaderInput), which last until the frame is drawn.
+func (p *Painter) EffectWords(n int) []uint32 {
+	at := len(p.s.Words)
+	p.s.Words = slices.Grow(p.s.Words, n)[:at+n]
+	w := p.s.Words[at : at+n : at+n]
+	clear(w)
+	return w
+}
+
+// ShaderEffect paints the rectangle r rounded by radius, in DIPs, with fx,
+// the effect of a shader of package ui/shader (scene.Effect.Shader),
+// reading in. Only this module's packages make such effects.
+func (p *Painter) ShaderEffect(fx *scene.Effect, r Rect, radius float32, in ShaderInput) {
+	if fx == nil || r.W <= 0 || r.H <= 0 {
+		return
+	}
 	p.add(scene.Op{Kind: scene.OpEffect, Rect: p.snap(r), Radii: p.radii([4]float32{radius, radius, radius, radius}), Continuous: continuousCorners,
 		Start: int32(len(p.s.Effects)), Opacity: p.opacity})
-	p.s.Effects = append(p.s.Effects, op)
+	p.s.Effects = append(p.s.Effects, in.op(fx))
 }
 
 // ShaderFill paints the text, paths and icons that fn paints with fx, the
@@ -93,9 +116,9 @@ func (p *Painter) ShaderEffect(fx *scene.Effect, r Rect, radius float32, uniform
 // pixel the shader's color times the shape's coverage. box, in DIPs, is
 // the box the shader fills, whose top left corner its positions start
 // from. Glyphs of color, as emoji, keep their colors, and what fn paints
-// besides, as rectangles and images, paints as it would. Only this
-// module's packages make such effects.
-func (p *Painter) ShaderFill(fx *scene.Effect, box Rect, uniforms []uint32, images [4]*Bitmap, fn func()) {
+// besides, as rectangles and images, paints as it would. fx reads in.
+// Only this module's packages make such effects.
+func (p *Painter) ShaderFill(fx *scene.Effect, box Rect, in ShaderInput, fn func()) {
 	if fx == nil || fn == nil {
 		return
 	}
@@ -105,12 +128,6 @@ func (p *Painter) ShaderFill(fx *scene.Effect, box Rect, uniforms []uint32, imag
 	start := len(p.s.Ops)
 	fn()
 	p.opaque = savedOpaque
-	var imgs [4]*scene.Image
-	for i, b := range images {
-		if b != nil {
-			imgs[i] = b.img
-		}
-	}
 	origin := p.snap(box)
 	at := p.transform.Pixels(p.scale)
 	// The ops fn added, each of glyphs becoming the effect's, followed by
@@ -152,8 +169,9 @@ func (p *Painter) ShaderFill(fx *scene.Effect, box Rect, uniforms []uint32, imag
 		}
 		p.s.Ops = append(p.s.Ops, scene.Op{Kind: scene.OpEffect, Rect: bounds, Transform: op.Transform,
 			Start: int32(len(p.s.Effects)), Opacity: p.opacity})
-		p.s.Effects = append(p.s.Effects, scene.EffectOp{Effect: fx, Uniforms: uniforms, Images: imgs,
-			Glyphs: [2]int32{masks, end}, Origin: [2]float32{ox, oy}})
+		fop := in.op(fx)
+		fop.Glyphs, fop.Origin = [2]int32{masks, end}, [2]float32{ox, oy}
+		p.s.Effects = append(p.s.Effects, fop)
 		if end-masks < op.End-op.Start {
 			c := op
 			c.Start = int32(len(p.s.Glyphs))

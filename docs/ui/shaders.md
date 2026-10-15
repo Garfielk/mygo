@@ -174,6 +174,33 @@ for _, t := range ripples {
 fx.Draw(p, r, shader.Options{Uniforms: map[string]any{"Taps": taps, "Count": len(ripples)}})
 ```
 
+For values set every frame, `Values` sets them by variables looked up
+once, with no map, no conversions and no allocation each draw, as
+Flutter's `FragmentShader` and Skia's `SkRuntimeShaderBuilder` hold them:
+
+```go
+var (
+	timeVar = waves.Uniform("Time") // panics for a name the shader lacks
+	tintVar = waves.Uniform("Tint")
+	values  = waves.NewValues()
+)
+
+values.Float(timeVar, float32(t)).Color(tintVar, theme.Accent)
+waves.Draw(p, r, shader.Options{Values: values})
+```
+
+Each setter checks the variable's type (`Float`, `Vec2` to `Vec4`, `Int`,
+`Uint`, `Bool`, and `Floats`, `Ints` and `Uints` for vectors, matrices and
+arrays) and panics for another, as for too many numbers; drawing copies
+the values, so one `Values` serves every draw. `Options.Uniforms` then
+sets the names it holds over them.
+
+A color (`Values.Color`, or a `ui.Color` in `Options.Uniforms`) sets a
+`vec3` or `vec4` to its components from 0 to 1, not premultiplied, in
+sRGB; where the window draws a wide gamut, a color outside sRGB, as
+`ui.Oklch` makes, reaches the shader in extended sRGB (components below 0
+or above 1), as the window's own colors do.
+
 ## Images
 
 A shader reads up to four images, `Options.Images`: bitmaps, or canvases'
