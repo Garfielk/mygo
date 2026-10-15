@@ -131,7 +131,13 @@ box.Draw(func(p *ui.Painter, r ui.Rect) {
 ## Errors and cost
 
 `Compile` reports what is wrong with a shader with its lines; compile
-shaders once, as package variables with `MustCompile`. A shader costs
+shaders once, as package variables with `MustCompile`. The renderer
+compiles what `Compile` makes of a shader again for the GPU: Metal keeps
+that on disk, while Direct3D's compiler takes from a tenth of a second to
+more than one. On Windows, `Compile` therefore starts it on a goroutine
+of its own; the renderers of every window share the code, waiting on
+their first draw only for what is left, and it stays in the user's cache
+directory (`MyGo\ShaderCache`) for later launches. A shader costs
 little to draw on a GPU, whatever it computes per pixel; on the CPU (the
 renderer of last resort, and `ui.Tester`) it runs interpreted, a few
 microseconds a pixel: seconds for a window. A shader covering much of the

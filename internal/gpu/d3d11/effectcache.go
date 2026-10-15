@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo/internal/gpu"
@@ -26,7 +27,8 @@ func PrecompileEffect(src string) {
 		effects.byKey = map[string]*effectEntry{}
 		effects.sem = make(chan struct{}, max(1, runtime.NumCPU()-1))
 		effects.dir = effectCacheDir()
-		compileEffectCode = effects.code
+		code := effects.code
+		sharedEffectCode.Store(&code)
 	})
 	e := effects.entry(src)
 	go func() {
@@ -36,10 +38,19 @@ func PrecompileEffect(src string) {
 	}()
 }
 
+// sharedEffectCode returns the code of an effect's pixel shader from the
+// cache, once PrecompileEffect made it, from any goroutine.
+var sharedEffectCode atomic.Pointer[func(src string) ([]byte, error)]
+
 // compileEffectCode compiles the pixel shader of an effect whose code
 // compiled ahead of time does not match its source: CompileEffect, until
 // PrecompileEffect shares the code between the renderers.
-var compileEffectCode = CompileEffect
+func compileEffectCode(src string) ([]byte, error) {
+	if f := sharedEffectCode.Load(); f != nil {
+		return (*f)(src)
+	}
+	return CompileEffect(src)
+}
 
 // effectCache is the code of effects' pixel shaders, by their source.
 type effectCache struct {
