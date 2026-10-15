@@ -129,7 +129,6 @@ type bracket struct {
 	prevDelim    int32
 	index        int
 	image        bool
-	active       bool
 	bracketAfter bool
 }
 
@@ -145,6 +144,9 @@ type inlineParser struct {
 	last  int32 // the last delimiter
 	br    []bracket
 	lastB int32 // the last bracket
+	// linked is the number of brackets when a link last closed: those
+	// before it, but for images, open no link, as links do not nest.
+	linked int32
 
 	backticks        [maxBackticks + 1]int
 	scannedBackticks bool
@@ -201,7 +203,7 @@ func (ip *inlineParser) run(s string) {
 	ip.nodes = append(ip.nodes[:0], inode{parent: -1, first: -1, last: -1, prev: -1, next: -1, end: len(s)})
 	ip.dl = ip.dl[:0]
 	ip.br = ip.br[:0]
-	ip.last, ip.lastB = -1, -1
+	ip.last, ip.lastB, ip.linked = -1, -1, 0
 	ip.scannedBackticks = false
 	ip.html.reset()
 	ip.noMath = -1
@@ -926,7 +928,7 @@ func (ip *inlineParser) addBracket(node int32, index int, image bool) {
 	if ip.lastB >= 0 {
 		ip.br[ip.lastB].bracketAfter = true
 	}
-	ip.br = append(ip.br, bracket{node: node, prev: ip.lastB, prevDelim: ip.last, index: index, image: image, active: true})
+	ip.br = append(ip.br, bracket{node: node, prev: ip.lastB, prevDelim: ip.last, index: index, image: image})
 	ip.lastB = int32(len(ip.br) - 1)
 }
 
@@ -943,7 +945,7 @@ func (ip *inlineParser) parseCloseBracket() {
 		return
 	}
 	op := ip.br[ip.lastB]
-	if !op.active {
+	if !op.image && ip.lastB < ip.linked {
 		ip.addText(start-1, start)
 		ip.popBracket()
 		return
@@ -1023,12 +1025,9 @@ func (ip *inlineParser) parseCloseBracket() {
 		ip.popBracket()
 		ip.unlink(op.node)
 		if !op.image {
-			for b := ip.lastB; b >= 0; b = ip.br[b].prev {
-				ip.d.steps++
-				if !ip.br[b].image {
-					ip.br[b].active = false
-				}
-			}
+			// The brackets open before it are below len(ip.br), as
+			// brackets are added at the end.
+			ip.linked = int32(len(ip.br))
 		}
 		return
 	}

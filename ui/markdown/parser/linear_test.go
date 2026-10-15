@@ -38,6 +38,7 @@ var pathological = []struct {
 	{"lines ending in CR", Default, repeat("a\r")},
 	{"indented lines", Default, repeat("a\n ")},
 	{"quoted lines", Default, repeat("> a\n")},
+	{"openers then links", Default, func(n int) string { return strings.Repeat("[", n) + strings.Repeat("[a](b)", n) }},
 	{"escaped pipes", Default, func(n int) string { return "| a |\n|---|\n| " + strings.Repeat(`\| *a* `, n) + "|" }},
 }
 
