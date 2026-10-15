@@ -48,12 +48,13 @@ func appClick(w *mygo.Window, x, y float64) bool {
 	return true
 }
 
-// heldAppClick is appClick with the button held down a while, as a user
-// clicks: what the press did runs before the release.
+// heldAppClick is appClick with the button held down, as a user clicks:
+// what the press did runs before the release, the work it left for the
+// main thread too.
 func heldAppClick(w *mygo.Window, x, y float64) bool {
 	waitOnScreen(w)
 	mygo.RunOnMain(func() { darwin.TestAppPress(w.NativeHandle(), x, y, true) })
-	time.Sleep(150 * time.Millisecond)
+	mygo.RunOnMain(func() {}) // after what the press posted
 	mygo.RunOnMain(func() { darwin.TestAppPress(w.NativeHandle(), x, y, false) })
 	return true
 }
