@@ -3820,8 +3820,12 @@ for the tag and creates the GitHub release.
 
 It does not run the tests again: `ci.yml` runs them on every push to main,
 for every platform, GUI tests included, so tag a commit whose CI passed.
-Its Windows job keeps the NSIS that the installer tests download in the
-Actions cache, under a key of `cmd/mygo/nsis.go`.
+Before the tests, each job downloads what they would download into the
+user's cache otherwise (`go run ./internal/prefetch`): the plugins'
+native libraries for its platform, and NSIS on Windows. It keeps them in
+the Actions cache, under a key of the files that pin them (the plugins'
+`mygo-plugin.json` and `internal/nsis/nsis.go`), so that the tests do
+not depend on the network.
 
 The NSIS that `mygo build` downloads (`Release` in `internal/nsis/nsis.go`)
 has a copy on a release of this repository, which a new version of NSIS
