@@ -1126,7 +1126,7 @@ const maxBytes = 4096
 // bindShader binds what the shader of batch b reads: its uniforms, laid
 // out as its effect says, in buffer 2, and its images in textures 5 to 8.
 func (r *Renderer) bindShader(enc id, b gpu.Batch) {
-	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Shader.Uniforms)
+	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Uniforms)
 	if n := len(r.shaderBytes); n > 0 && n <= maxBytes {
 		send(enc, "setFragmentBytes:length:atIndex:", uintptr(unsafe.Pointer(&r.shaderBytes[0])), uintptr(n), 2)
 	} else if n > 0 {

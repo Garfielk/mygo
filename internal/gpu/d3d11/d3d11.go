@@ -890,7 +890,7 @@ func (r *Renderer) drawScene(s *scene.Scene, b *gpu.Builder, rtv uintptr) error 
 // out as its effect says, in the constant buffer of register b2, which
 // grows as needed, and its images in registers t6 to t9.
 func (r *Renderer) bindShader(b gpu.Batch) error {
-	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Shader.Uniforms)
+	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Uniforms)
 	if n := len(r.shaderBytes); n > 0 {
 		if n > r.shaderCBSize {
 			free(&r.shaderCB)
