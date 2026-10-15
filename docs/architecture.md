@@ -1642,7 +1642,11 @@ after the debounce, the core lists again the directories that notices
 named and stats the files, and the events are the differences between what
 it sees and what it saw (`fileWatchDiff`). An entry whose identity
 (`os.SameFile`) moved is a rename, unless a hard link makes it ambiguous,
-and what moved with a directory renamed above it says nothing more. When
+and what moved with a directory renamed above it says nothing more. The
+entries are paired by looking their identity up (`fileWatchIDs`: device
+and inode, or on Windows the volume and file index `os.SameFile` reads),
+so a directory of n files renamed costs n lookups, not n² comparisons;
+an entry whose identity can't be read is compared with every other one. When
 the system lost changes (an inotify queue overflow, Windows'
 `ERROR_NOTIFY_ENUM_DIR`, FSEvents' `MustScanSubDirs` or a dropped event),
 the core lists every directory again rather than stopping. Enrolling is
