@@ -52,7 +52,7 @@ type fileWatchHints struct {
 	name     string
 	// targets are the enrolled directories, by slash-separated path
 	// relative to the root ("." for the root, ".." for its parent).
-	targets            map[string]platform.FileWatchTarget
+	targets            map[string]fileWatchTargetRef
 	ids                map[uint64]string
 	next               uint64
 	subtree, noSubtree bool
@@ -67,7 +67,7 @@ type fileWatchHints struct {
 func newFileWatchHints(w *FileWatcher) *fileWatchHints {
 	return &fileWatchHints{
 		w:       w,
-		targets: map[string]platform.FileWatchTarget{},
+		targets: map[string]fileWatchTargetRef{},
 		ids:     map[uint64]string{},
 		hints:   map[string]bool{},
 		walks:   map[string]bool{},
@@ -234,7 +234,7 @@ func (s *fileWatchHints) enrollTree(dir *os.Root, name, p string, want os.FileIn
 // as it is enrolled is left to the hint of its parent.
 func (s *fileWatchHints) enroll(p string, info os.FileInfo) error {
 	if t, ok := s.targets[p]; ok {
-		if os.SameFile(t.Info, info) {
+		if t.identity == fileWatchEntryOf(info).id {
 			return nil
 		}
 		s.unenroll(p)
@@ -285,15 +285,15 @@ func (s *fileWatchHints) add(p string, info os.FileInfo) error {
 }
 
 func (s *fileWatchHints) record(p string, t platform.FileWatchTarget) {
-	s.targets[p] = t
+	s.targets[p] = fileWatchTargetRef{id: t.ID, identity: fileWatchEntryOf(t.Info).id, directory: true, subtree: t.Subtree}
 	s.ids[t.ID] = p
 }
 
 func (s *fileWatchHints) unenroll(p string) {
 	if t, ok := s.targets[p]; ok {
 		delete(s.targets, p)
-		delete(s.ids, t.ID)
-		s.w.native.Remove(t.ID)
+		delete(s.ids, t.id)
+		s.w.native.Remove(t.id)
 		if p == "." {
 			s.subtree = false
 		}
@@ -437,7 +437,7 @@ func (s *fileWatchHints) update() ([]FileEvent, error) {
 				continue
 			}
 			info, err := s.root.Lstat(filepath.FromSlash(p))
-			if err == nil && info.IsDir() && os.SameFile(t.Info, StatIdentity(info)) {
+			if err == nil && info.IsDir() && t.identity == fileWatchEntryOf(info).id {
 				continue
 			}
 			// Moved, removed or replaced: what was enrolled there is stale.

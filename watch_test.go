@@ -555,7 +555,7 @@ func TestFileWatchDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := map[string]os.FileInfo{"a": info}
+	old := map[string]fileWatchEntry{"a": fileWatchEntryOf(info)}
 	if err := os.Rename(a, b); err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +563,7 @@ func TestFileWatchDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := fileWatchDiff(old, map[string]os.FileInfo{"b": info}, map[string]bool{"a": true})
+	events := fileWatchDiff(old, map[string]fileWatchEntry{"b": fileWatchEntryOf(info)}, map[string]bool{"a": true})
 	if len(events) != 2 || events[0].Op != FileRename || events[0].OldPath != "a" || events[1].Op != FileWrite {
 		t.Fatalf("%+v", events)
 	}
@@ -629,15 +629,18 @@ func TestFileWatchIdentity(t *testing.T) {
 	}
 }
 
-// Pairing by identity reports what comparing every entry with os.SameFile
-// does, for updates that rename, replace, hard link, move with a
+// Pairing by identity pairs what comparing every entry with every other
+// one would, for updates that rename, replace, hard link, move with a
 // directory, create and remove.
 func TestFileWatchDiffPairing(t *testing.T) {
-	infos := fileWatchTestInfos(t, t.TempDir())
+	var infos []fileWatchEntry
+	for _, info := range fileWatchTestInfos(t, t.TempDir()) {
+		infos = append(infos, fileWatchEntryOf(info))
+	}
 	paths := []string{"a", "b", "c", "d", "d/x", "d/y", "e", "e/x", "e/y", "f"}
 	rng := rand.New(rand.NewPCG(1, 2))
-	pick := func() map[string]os.FileInfo {
-		m := map[string]os.FileInfo{}
+	pick := func() map[string]fileWatchEntry {
+		m := map[string]fileWatchEntry{}
 		for _, p := range paths {
 			if rng.IntN(3) > 0 {
 				m[p] = infos[rng.IntN(len(infos))]
@@ -645,71 +648,91 @@ func TestFileWatchDiffPairing(t *testing.T) {
 		}
 		return m
 	}
-	defer func() { fileWatchPairBySameFile = false }()
+	// unique reports whether exactly one entry of m is a.
+	unique := func(m map[string]fileWatchEntry, a fileWatchEntry) bool {
+		count := 0
+		for _, v := range m {
+			if v.id == a.id {
+				count++
+			}
+		}
+		return count == 1
+	}
+	paired := 0
 	for i := range 5000 {
 		before, after := pick(), pick()
-		writes := map[string]bool{}
-		if rng.IntN(2) == 0 {
-			writes[paths[rng.IntN(len(paths))]] = true
+		ids := newFileWatchIDs(before, after)
+		for old, a := range before {
+			want, count := "", 0
+			for p, b := range after {
+				if b.id == a.id {
+					if c, ok := before[p]; !ok || c.id != b.id {
+						want = p
+						count++
+					}
+				}
+			}
+			if count != 1 || !unique(before, a) || !unique(after, a) {
+				want = ""
+			}
+			got := ids.pair(a)
+			if got != "" {
+				if c, ok := before[got]; ok && c.id == a.id {
+					got = "" // not created: the same file at the same path
+				}
+			}
+			if got != want {
+				t.Fatalf("case %d, %s: by identity %q, by comparing all %q; before %v after %v", i, old, got, want, fileWatchTestNames(before), fileWatchTestNames(after))
+			}
+			if got != "" {
+				paired++
+			}
 		}
-		fileWatchPairBySameFile = false
-		got := fileWatchDiff(before, after, writes)
-		fileWatchPairBySameFile = true
-		want := fileWatchDiff(before, after, writes)
-		if !slices.Equal(got, want) {
-			t.Fatalf("case %d: before %v after %v: by identity %+v, by SameFile %+v", i, fileWatchTestNames(before), fileWatchTestNames(after), got, want)
-		}
+	}
+	if paired == 0 {
+		t.Fatal("nothing paired")
 	}
 }
 
-func fileWatchTestNames(m map[string]os.FileInfo) map[string]string {
-	names := map[string]string{}
-	for p, info := range m {
-		names[p] = info.Name()
+func fileWatchTestNames(m map[string]fileWatchEntry) map[string]uint64 {
+	names := map[string]uint64{}
+	for p, e := range m {
+		names[p] = e.id.index
 	}
 	return names
 }
 
 // A directory of n files renamed is paired in time linear in n: by
-// identity, not by comparing every entry with every other one, as
-// bySameFile still does.
+// identity, not by comparing every entry with every other one.
 func BenchmarkFileWatchDiffRename(b *testing.B) {
-	for _, run := range []struct {
-		name       string
-		bySameFile bool
-		sizes      []int
-	}{{"byIdentity", false, []int{2500, 5000, 10000, 20000, 40000}}, {"bySameFile", true, []int{2500, 5000, 10000}}} {
-		for _, n := range run.sizes {
-			b.Run(fmt.Sprintf("%s/%d", run.name, n), func(b *testing.B) {
-				fileWatchPairBySameFile = run.bySameFile
-				defer func() { fileWatchPairBySameFile = false }()
-				dir := b.TempDir()
-				before := map[string]os.FileInfo{}
-				after := map[string]os.FileInfo{}
-				for i := range n {
-					name := fmt.Sprint("f", i)
-					if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
-						b.Fatal(err)
-					}
-					info, err := os.Lstat(filepath.Join(dir, name))
-					if err != nil {
-						b.Fatal(err)
-					}
-					info = StatIdentity(info)
-					before["a/"+name], after["b/"+name] = info, info
+	for _, n := range []int{2500, 5000, 10000, 20000, 40000} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			dir := b.TempDir()
+			before := map[string]fileWatchEntry{}
+			after := map[string]fileWatchEntry{}
+			for i := range n {
+				name := fmt.Sprint("f", i)
+				if err := os.WriteFile(filepath.Join(dir, name), nil, 0600); err != nil {
+					b.Fatal(err)
 				}
-				info, err := os.Lstat(dir)
+				info, err := os.Lstat(filepath.Join(dir, name))
 				if err != nil {
 					b.Fatal(err)
 				}
-				before["a"], after["b"] = StatIdentity(info), info
-				for b.Loop() {
-					if events := fileWatchDiff(before, after, nil); len(events) != 1 || events[0].Op != FileRename {
-						b.Fatal(events)
-					}
+				e := fileWatchEntryOf(info)
+				before["a/"+name], after["b/"+name] = e, e
+			}
+			info, err := os.Lstat(dir)
+			if err != nil {
+				b.Fatal(err)
+			}
+			before["a"], after["b"] = fileWatchEntryOf(info), fileWatchEntryOf(info)
+			for b.Loop() {
+				if events := fileWatchDiff(before, after, nil); len(events) != 1 || events[0].Op != FileRename {
+					b.Fatal(events)
 				}
-			})
-		}
+			}
+		})
 	}
 }
 
