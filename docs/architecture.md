@@ -14,7 +14,11 @@ framework safely. Read it before changing anything under `internal/`.
   takes 44 MB on macOS, and the counter example 65 to 67 MB on Linux, tiled
   to half of a 4K display at scale 2, 15 MB of it the window's buffer,
   without loading Mesa (122 to 155 MB with it). Nothing
-  polls: all work is driven by native events or explicit wake-ups.
+  polls: all work is driven by native events or explicit wake-ups. A
+  window of native UI whose content settled asks for no frame and arms no
+  timer (`TestSettledWindowSleeps`): the display link pauses, Go's
+  scheduler sleeps, and the counter example idles at about 0.005% of a
+  core on macOS (an AppKit window, 0.002%) and wakes no thread under X11.
 - **No cgo.** Everything builds with `CGO_ENABLED=0`, so any platform can be
   cross-compiled from any machine. Native APIs are called at run time through
   [purego](https://github.com/ebitengine/purego) (`dlopen` + assembly
@@ -3172,6 +3176,13 @@ either.
   border-only fills draw as up to four scissored strips around interiors
   where their output is zero. These scissors never change a clip mask's
   sampling coordinates. Both transformations are shared by all GPU backends.
+  Large fills, shadows and images with continuous corners (negative radii,
+  which only Metal gets) draw as nine-patches (`gpu/corners.go`): their
+  corners' boxes as they are, and the cross between them as a twin with
+  square corners, in batches whose pipeline lacks the curves' code. Away
+  from the boxes the shader computes the same value either way: a fill's
+  pixel area, and a blurred shadow whose samples miss the curved rows or
+  whose blurred sides round to 0 and 1 (9 sigma from the curve).
   Metal opts into three further builder capabilities: marking fills whose
   clip coverage is one, splitting opaque cores from blended edges, and
   batching by fragment class. Other renderers keep the original instance
@@ -3864,6 +3875,17 @@ culled operations, opaque cores and Metal specialization fallbacks.
 no renderer can be created. They compare raw BGRA8 and float16 output with
 both disabled optimizations and the shader from upstream f2eca9f7, including
 canvases and pixelated sprites.
+
+`BenchmarkStressFrame` in `ui` times the frames of views that change all
+they show every frame, in a window of 900×640 at scale 2: 600 rounded
+boxes casting shadows moving and changing color, 300 labels whose numbers
+change, a column of 1000 rows in a clipped box moved by a translation,
+a `List` of 100,000 rows scrolling 3 rows a frame, and a dashboard of 12
+cards with shadows, texts and progress bars. Its host (`stressHost`)
+hands the scene on rather than draw it on the CPU, so `ns/op` is the
+frame built, laid out and painted. `BenchmarkStressFrameGPU` draws the
+same frames with Metal (`metal.Offscreen`), its `GPU-ms` the GPU's time,
+which the page shows as the GPU metric.
 
 Benchmarks are described on the page by their doc comments, which the
 site reads when it is built: start them with the benchmark's name.
