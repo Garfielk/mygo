@@ -150,7 +150,12 @@ func TestNativesFromSources(t *testing.T) {
 	if _, err := exec.LookPath("cargo"); err != nil {
 		t.Skip("cargo is not installed")
 	}
-	dir := t.TempDir()
+	// go list reports the directories of packages with their links
+	// resolved, as macOS's /var in /private/var.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeFiles(t, dir, map[string]string{
 		"go.mod":            "module example.com/app\n\ngo 1.27\n",
 		"main.go":           "package main\n\nimport _ \"example.com/app/lib\"\n\nfunc main() {}\n",
