@@ -123,8 +123,10 @@ runs on when it needs a later one than the app's minimum or 12:
 { "name": "adder", "build": { "cargo": "./rust", "args": ["--features", "simd"], "macOS": "13.0" } }
 ```
 
-Linux libraries lose their debug information, which Zig keeps even in
-libraries that ask to be stripped.
+The CLI removes debug information from the Linux libraries it builds, as
+`strip --strip-debug` would, because Zig can leave it in even when
+`build.zig` asks to strip: libghostty-vt would be 10 MB instead of 2.4 MB.
+Exported functions stay, so `ffi` still finds them.
 
 ## Binding functions
 

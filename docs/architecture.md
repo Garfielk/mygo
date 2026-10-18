@@ -3614,8 +3614,9 @@ renderer's (`gputest.Compare`).
   Windows (MSVC). macOS libraries get the app's minimum version or the
   library's `macOS`, the later (`MACOSX_DEPLOYMENT_TARGET`, Zig's
   `-macos.<version>` target, without which Zig asks for the latest macOS).
-  Linux libraries lose the contents of their debug sections (`stripELF`),
-  which Zig keeps in libraries that ask to be stripped. cargo's JSON messages name the crate's
+  The CLI empties the debug sections of the Linux libraries it builds
+  (`stripELF`, as `strip --strip-debug`), as Zig can keep them even when
+  `build.zig` asks to strip (libghostty-vt's). cargo's JSON messages name the crate's
   cdylib; zig's prefix is searched for the one library it installed. Both
   build incrementally, so `mygo dev` builds on every rebuild, and watches
   the sources (but `target`, `zig-out` and hidden directories). Other
