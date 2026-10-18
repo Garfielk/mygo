@@ -125,7 +125,7 @@ func TestPath(t *testing.T) {
 	defer srv.Close()
 	target := runtime.GOOS + "-" + runtime.GOARCH
 	file := nativelib.FileName("x", runtime.GOOS)
-	manifest := fmt.Appendf(nil, `{"libraries": [{"name": "x", "build": {"cargo": "rust"}, "files": {%q: {"name": %q, "url": %q, "sha256": %q}}}]}`,
+	manifest := fmt.Appendf(nil, `{"libraries": [{"name": "x", "build": {"cargo": "./rust"}, "files": {%q: {"name": %q, "url": %q, "sha256": %q}}}]}`,
 		target, file, srv.URL, hex.EncodeToString(sum[:]))
 
 	// The published build, downloaded once.

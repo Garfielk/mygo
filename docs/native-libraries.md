@@ -46,7 +46,7 @@ pub extern "C" fn add(a: i32, b: i32) -> i32 {
 ```json
 {
   "libraries": [
-    { "name": "adder", "build": { "cargo": "rust" } }
+    { "name": "adder", "build": { "cargo": "./rust" } }
   ]
 }
 ```
@@ -88,7 +88,7 @@ cargo-zigbuild are installed.
 
 ## A Zig package
 
-The same, with `"build": {"zig": "<dir>"}` naming the directory of a
+The same, with `"build": {"zig": "./zig"}` naming the directory of a
 `build.zig` that installs a dynamic library:
 
 ```zig
@@ -115,7 +115,7 @@ release profile or the optimize mode when it names one (`--profile`,
 `-Doptimize=ReleaseSmall`):
 
 ```json
-{ "name": "adder", "build": { "cargo": "rust", "args": ["--features", "simd"] } }
+{ "name": "adder", "build": { "cargo": "./rust", "args": ["--features", "simd"] } }
 ```
 
 ## Binding functions
@@ -291,8 +291,8 @@ macOS 12 and later.
 | Field | |
 |---|---|
 | `libraries[].name` | the library: `ffi.New`'s name, and its files' (`lib<name>.dylib`, `lib<name>.so`, `<name>.dll`, a leading `lib` dropped on Windows) |
-| `libraries[].build.cargo` | the directory of the Rust crate, relative to the package |
-| `libraries[].build.zig` | the directory of the Zig package, relative to the package |
+| `libraries[].build.cargo` | the directory of the Rust crate, relative to the package, as `"./rust"` |
+| `libraries[].build.zig` | the directory of the Zig package, relative to the package, as `"./zig"` |
 | `libraries[].build.args` | more arguments of `cargo build` or `zig build` |
 | `libraries[].release` | where the published files are |
 | `libraries[].files` | the published files by `GOOS-GOARCH`: `name`, `url` and `sha256`, written by `mygo native build` |

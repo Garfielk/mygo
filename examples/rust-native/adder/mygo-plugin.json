@@ -3,7 +3,7 @@
     {
       "name": "adder",
       "build": {
-        "cargo": "rust"
+        "cargo": "./rust"
       }
     }
   ]

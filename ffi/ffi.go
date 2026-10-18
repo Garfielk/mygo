@@ -5,7 +5,7 @@
 // A package names the libraries it binds in mygo-plugin.json, next to its
 // sources, with how to build them:
 //
-//	{"libraries": [{"name": "adder", "build": {"cargo": "rust"}}]}
+//	{"libraries": [{"name": "adder", "build": {"cargo": "./rust"}}]}
 //
 // `mygo dev` and `mygo build` build them for the app's platform (cargo
 // build or zig build) and put them among the app's resources;

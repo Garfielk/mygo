@@ -90,7 +90,7 @@ func runNative(args []string) error {
 		}
 	}
 	if len(libs) == 0 {
-		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"<dir>\"} or {\"zig\": \"<dir>\"})", pluginFile, dir)
+		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"./<dir>\"} or {\"zig\": \"./<dir>\"})", pluginFile, dir)
 	}
 	if !host {
 		warnNativeRelease(pkgs, targets)

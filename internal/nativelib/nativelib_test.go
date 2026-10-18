@@ -7,14 +7,14 @@ import (
 
 func TestParse(t *testing.T) {
 	sum := strings.Repeat("ab", 32)
-	ok := `{"libraries": [{"name": "adder", "build": {"cargo": "rust/adder", "args": ["--features", "x"]}, "release": "https://example.com/r",
+	ok := `{"libraries": [{"name": "adder", "build": {"cargo": "./rust/adder", "args": ["--features", "x"]}, "release": "https://example.com/r",
 		"files": {"linux-amd64": {"name": "libadder.so", "url": "https://example.com/r/adder-linux-amd64.so", "sha256": "` + sum + `"}}}]}`
 	m, err := Parse([]byte(ok))
 	if err != nil {
 		t.Fatal(err)
 	}
 	l, found := m.Lookup("adder")
-	if tool, dir := l.Build.Tool(); !found || tool != "cargo" || dir != "rust/adder" {
+	if tool, dir := l.Build.Tool(); !found || tool != "cargo" || dir != "./rust/adder" {
 		t.Fatalf("Lookup = %+v, %v", l, found)
 	}
 	if l.FileName("linux", "amd64") != "libadder.so" || l.FileName("windows", "arm64") != "adder.dll" {

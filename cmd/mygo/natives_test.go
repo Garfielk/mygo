@@ -160,7 +160,7 @@ func TestNativesFromSources(t *testing.T) {
 		"go.mod":            "module example.com/app\n\ngo 1.27\n",
 		"main.go":           "package main\n\nimport _ \"example.com/app/lib\"\n\nfunc main() {}\n",
 		"lib/lib.go":        "package lib\n",
-		"lib/" + pluginFile: `{"libraries": [{"name": "adder", "build": {"cargo": "rust"}}]}`,
+		"lib/" + pluginFile: `{"libraries": [{"name": "adder", "build": {"cargo": "./rust"}}]}`,
 		"lib/rust/Cargo.toml": "[package]\nname = \"adder\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n" +
 			"[lib]\ncrate-type = [\"cdylib\"]\n",
 		"lib/rust/src/lib.rs": "#[no_mangle]\npub extern \"C\" fn add(a: i32, b: i32) -> i32 { a + b }\n",

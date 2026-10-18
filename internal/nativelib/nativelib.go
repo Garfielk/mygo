@@ -6,7 +6,7 @@
 //
 //	{"libraries": [{
 //		"name": "adder",
-//		"build": {"cargo": "rust"},
+//		"build": {"cargo": "./rust"},
 //		"release": "https://github.com/me/app/releases/download/adder-v1",
 //		"files": {"darwin-arm64": {"name": "libadder.dylib", "url": "…", "sha256": "…"}, …}
 //	}]}
@@ -54,7 +54,8 @@ type Library struct {
 }
 
 // Build is how a library is built from its sources: exactly one of Cargo
-// and Zig, a directory relative to the package's.
+// and Zig, a directory relative to the package's, written "./rust" to read
+// as one.
 type Build struct {
 	// Cargo is the directory of the Rust crate (its Cargo.toml), whose
 	// crate-type includes "cdylib".
