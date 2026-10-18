@@ -71,6 +71,8 @@ go run ./examples/code-editor              # the code editor and the diff viewer
 go run ./examples/markdown-chat            # Markdown replies streaming in (ui/markdown)
 go run ./examples/notes                    # the rich text editor (ui/richtext), in a notes app
 go run ./examples/terminal                 # a terminal (downloads libghostty-vt once)
+go run ./cmd/mygo native build -target host examples/rust-native  # build a package's Rust/Zig library for go run and go test (cargo)
+go run ./cmd/mygo native build ./pkg       # its libraries for every platform, into mygo-plugin.json, ready to publish
 go generate ./plugins/terminal             # build libghostty-vt for every platform (with Zig), write Ghostty's themes
 go generate ./internal/gpu/d3d11           # recompile the Direct3D shader (on Windows)
 go generate ./internal/gpu/metal           # recompile the Metal shader (on macOS, with Xcode)
@@ -121,6 +123,12 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
   template depends on both. Pushing a `v<version>` tag releases everything
   (`.github/workflows/release.yml`, see "Releasing" in the architecture
   guide); never commit the CLI's binaries.
+- Native libraries of apps and plugins (Rust crates, Zig packages, C) are
+  named in the binding package's `mygo-plugin.json` (`internal/nativelib`)
+  and loaded and bound with package `ffi`, never with a loader of their
+  own: the CLI builds those with `build` from their sources in `mygo dev`
+  and `mygo build`, and `mygo native build` publishes them for the apps of
+  others.
 - The configuration types of `packages/cli/index.d.ts` (for `mygo.config.ts`)
   mirror `Config` in `cmd/mygo/config.go`; `TestConfigTypes` checks them.
 - Tests: unit tests through `internal/fake`; GUI behavior in `internal/e2e`.

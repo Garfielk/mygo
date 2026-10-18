@@ -106,6 +106,9 @@ What every app has, whether its windows show native UI or web pages.
 - [Launchers](launchers.md): apps in the manner of Spotlight and Raycast,
   summoned by a shortcut over every app, which find and open the apps
   installed.
+- [Native libraries](native-libraries.md): calling Rust crates, Zig
+  packages and C libraries without cgo, which the CLI builds, puts into
+  apps and publishes for the users of your Go packages.
 
 ## Native UI
 

@@ -101,3 +101,8 @@ export const now = async () => new Date(await call<string>("plugin:clock.Now"));
 Only the app's trusted pages may call a plugin, as with every bound method.
 `mygo.Use` panics when a name is taken or the service's methods use types
 that cannot cross to JavaScript, so mistakes show at startup.
+
+A plugin that calls a native library, in Rust, Zig or C, binds it with
+package `ffi` and names it in `mygo-plugin.json` next to its Go sources:
+the CLI puts the library into the apps that use the plugin. See
+[Native libraries](native-libraries.md).
