@@ -23,6 +23,9 @@ func TestAdder(t *testing.T) {
 	if got := CountVowels("MyGo calls Rust"); got != 3 {
 		t.Errorf("CountVowels = %d", got)
 	}
+	if got := Greeting("Go"); got != "Hello, Go!" {
+		t.Errorf("Greeting = %q", got)
+	}
 	if got := Version(); got != "adder 0.1.0" {
 		t.Errorf("Version = %q", got)
 	}

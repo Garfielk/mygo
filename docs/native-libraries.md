@@ -82,7 +82,9 @@ func Add(a, b int32) (int32, error) {
 That is all: `mygo dev` builds the crate with cargo, puts the library into
 the app and rebuilds it when the crate changes, and `mygo build` builds it
 for the platform of each app. cargo keeps its files in `.mygo/native` of
-the module, not in the crate.
+the module, not in the crate: keep `.mygo/` in your `.gitignore`, as the
+projects `mygo init` makes do. `mygo doctor` tells which of cargo, Zig and
+cargo-zigbuild are installed.
 
 ## A Zig package
 
@@ -105,10 +107,12 @@ pub fn build(b: *std.Build) void {
 ```
 
 The CLI runs `zig build -Dtarget=<target> -Doptimize=ReleaseFast` in that
-directory. A `build.zig` that compiles C sources (`addCSourceFiles`) binds
+directory, and cargo with `--release`. A `build.zig` that compiles C sources (`addCSourceFiles`) binds
 a C library the same way, as the [SQLite plugin](plugins/sqlite.md) does.
 
-`"args"` adds arguments to `cargo build` or `zig build`:
+`"args"` adds arguments to `cargo build` or `zig build`, and replaces the
+release profile or the optimize mode when it names one (`--profile`,
+`-Doptimize=ReleaseSmall`):
 
 ```json
 { "name": "adder", "build": { "cargo": "rust", "args": ["--features", "simd"] } }
@@ -117,8 +121,10 @@ a C library the same way, as the [SQLite plugin](plugins/sqlite.md) does.
 ## Binding functions
 
 `Library.Bind` takes a pointer to a struct of functions, which it binds the
-first time and leaves alone afterwards, so calling it before each use costs
-little. A field calls the library's function named by its tag, or else its
+first time; later calls with the same pointer, from any goroutine, return
+the first one's result without binding again, so calling it before each
+use, as above, is safe and cheap. A function bound to nothing, as an
+unknown tag option or a missing function, makes it return an error. A field calls the library's function named by its tag, or else its
 name in snake case (`CountVowels` calls `count_vowels`):
 
 ```go
@@ -148,8 +154,38 @@ on the calling goroutine, and pass what C does:
 | structs of the types above | structs, whose padding the Go struct must spell out | `#[repr(C)]` structs |
 
 The library must not keep Go memory past the call, as with cgo. A string
-the library returns is copied into Go but not freed, so return static strings, or export a function that
-frees what the library allocated and call it. Libraries are loaded once and
+the library returns is copied into Go but not freed, so return static
+strings, or return a pointer (`unsafe.Pointer`) and export a function that
+frees what the library allocated:
+
+```rust
+#[no_mangle]
+pub extern "C" fn greeting(name: *const c_char) -> *mut c_char {
+    let name = unsafe { CStr::from_ptr(name) }.to_string_lossy();
+    CString::new(format!("Hello, {name}")).unwrap().into_raw()
+}
+
+#[no_mangle]
+pub extern "C" fn free_string(s: *mut c_char) {
+    if !s.is_null() {
+        drop(unsafe { CString::from_raw(s) });
+    }
+}
+```
+
+```go
+var fns struct {
+	Greeting   func(name string) unsafe.Pointer
+	FreeString func(s unsafe.Pointer)
+}
+
+func Greeting(name string) string {
+	p := fns.Greeting(name)
+	defer fns.FreeString(p)
+	return ffi.GoString(p) // copies it
+}
+```
+ Libraries are loaded once and
 stay loaded. `ffi` works on macOS, Linux and Windows on amd64 and arm64;
 elsewhere, as in browsers, `Load` returns an error that wraps
 `errors.ErrUnsupported`.
@@ -170,12 +206,29 @@ and, in programs that are not packaged apps:
 5. the published one, downloaded once into the user's cache and checked
    against its SHA-256.
 
-So `go run` and `go test` find the library once the CLI built it for the
-machine:
+Packaged apps never download libraries: the production builds of `mygo
+build` leave the downloader out, and HTTP with it.
+
+## Testing
+
+`go run` and `go test` find the library once the CLI built it for the
+machine. A `go:generate` line in the binding package builds it:
+
+```go
+//go:generate go tool mygo native build -target host .
+```
 
 ```sh
-mygo native build -target host   # or run mygo dev once
-go test ./adder
+go generate ./... && go test ./...
+```
+
+Without a build of its own, a program downloads the published build,
+which may be older than the sources. In CI, build it before the tests;
+GitHub's runners have cargo:
+
+```yaml
+- run: go tool mygo native build -target host ./adder
+- run: go test ./...
 ```
 
 ## Publishing a package
@@ -193,8 +246,14 @@ It builds the library for macOS, Linux and Windows on amd64 and arm64,
 writes the files into `.mygo/native/release` of the module, and writes
 each one's name, URL and SHA-256 into `mygo-plugin.json`, with the release,
 which later runs reuse. `-upload` uploads the files to that GitHub release
-with the [GitHub CLI](https://cli.github.com), creating it if needed. Then
-commit `mygo-plugin.json` and tag your module.
+with the [GitHub CLI](https://cli.github.com), creating it if needed,
+before writing `mygo-plugin.json`. Then commit `mygo-plugin.json` and tag
+your module.
+
+The files' names carry their SHA-256 (`adder-linux-amd64-1a2b3c4d5e6f.so`),
+so publishing new builds into the same release never replaces a file that
+an earlier version of your module points at. Platforms that fail to build
+are listed at the end, and left as they were in `mygo-plugin.json`.
 
 | Flag | |
 |---|---|
@@ -223,8 +282,9 @@ mygo native build -target linux-amd64,linux-arm64,windows-amd64,windows-arm64 -u
 
 Linux libraries are linked against glibc 2.28 (by Zig, and by
 cargo-zigbuild when it is installed), so that they load on Debian 10,
-Ubuntu 20.04 and later, and macOS libraries support the app's
-`macOS.minimumSystemVersion`, or macOS 12 and later.
+Ubuntu 20.04 and later. macOS libraries that `mygo dev` and `mygo build`
+build support the app's `macOS.minimumSystemVersion`, and published ones
+macOS 12 and later.
 
 ## mygo-plugin.json
 

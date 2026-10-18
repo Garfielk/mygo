@@ -245,10 +245,15 @@ directory's module, then the published file in the user's cache,
 downloaded when missing), loads it once (`dlopen` with `RTLD_LOCAL`,
 `LoadLibrary` on Windows), and `Bind` sets a struct's function fields with
 `purego.RegisterFunc`, by tag or by the field's name in snake case, turning
-purego's panics on unsupported signatures into errors. The terminal and
-SQLite plugins find their libraries through it. Elsewhere than macOS,
-Linux and Windows on amd64 and arm64 it reports `errors.ErrUnsupported`.
-Apps that do not import it link none of it.
+purego's panics on unsupported signatures into errors. `Bind` and
+`BindFunc` bind a pointer once, under the library's mutex, and remember
+the result in a `sync.Map`, so that functions can call `Bind` before each
+use from any goroutine without locking. The terminal and SQLite plugins
+find their libraries through it. Elsewhere than macOS, Linux and Windows
+on amd64 and arm64 it reports `errors.ErrUnsupported`. Apps that do not
+import it link none of it, and production builds (`mygo_nodownload`, set
+by `mygo build` with `mygo_noinspector`) leave out its downloader and
+`net/http` with it, about 1.9 MB, as packaged apps never download.
 
 ### macOS (`internal/darwin`)
 
@@ -3536,8 +3541,9 @@ renderer's (`gputest.Compare`).
   (redrawn two lines up with the cursor saved, until a line moves it).
 - `build` generates the client, runs `buildCommand`, then compiles each
   target with `-trimpath -ldflags "-s -w -X …production=1"` (`-H=windowsgui`
-  on Windows) and `-tags mygo_noinspector`, which leaves the inspector of
-  native UI out (unless `MYGO_INSPECTOR=1`), into a staging directory, so a
+  on Windows) and `-tags mygo_nodownload,mygo_noinspector`, which leave
+  out package ffi's downloader and the inspector of native UI (unless
+  `MYGO_INSPECTOR=1`), into a staging directory, so a
   failed build keeps the previous artifacts. `frontendDist` is embedded without touching the project
   (`embed.go`): `go build -overlay` adds a generated `mygo_frontend_gen.go`
   to the main package, with `//go:embed all:mygo_frontend` and a call to
@@ -3588,15 +3594,18 @@ renderer's (`gputest.Compare`).
   cargo, a Zig package for zig build) and its published files, one per
   platform with its URL and SHA-256, as the terminal plugin names
   libghostty-vt: `go list -deps` of the target finds them. A library with
-  `build` in a package outside the module cache (the app's own, or a
-  module replaced by a directory) is built for the target
-  (`nativebuild.go`) into `.mygo/native/<goos>-<goarch>` of its module,
+  `build` in a package outside the module cache and `vendor` (the app's
+  own, or a module replaced by a directory) whose sources are there is
+  built for the target (`nativebuild.go`; its published file instead when
+  the tool is missing) into `.mygo/native/<goos>-<goarch>` of its module,
   cargo with `CARGO_TARGET_DIR` and zig with `--prefix` and `--cache-dir`
-  under `.mygo/native` too, so that nothing is written into the sources
-  and a package in a read-only directory could be built; cargo-zigbuild,
-  when installed, links Linux (against glibc 2.28, as Zig does) and other
-  platforms' libraries, and macOS ones get the app's minimum version as
-  `MACOSX_DEPLOYMENT_TARGET`. cargo's JSON messages name the crate's
+  under `.mygo/native` too, so that builds write nothing into the sources
+  but cargo's `Cargo.lock`. cargo-zigbuild, when installed with Zig, links
+  Linux (against glibc 2.28, as Zig does) and other platforms' libraries
+  but macOS's, which need Apple's SDK and so a Mac, and Windows' on
+  Windows (MSVC). macOS libraries get the app's minimum version
+  (`MACOSX_DEPLOYMENT_TARGET`, Zig's `-macos.<version>` target, without
+  which Zig asks for the latest macOS). cargo's JSON messages name the crate's
   cdylib; zig's prefix is searched for the one library it installed. Both
   build incrementally, so `mygo dev` builds on every rebuild, and watches
   the sources (but `target`, `zig-out` and hidden directories). Other
@@ -3605,11 +3614,14 @@ renderer's (`gputest.Compare`).
   installed at the top of the resources like a listed resource, both
   architectures of a universal app combined. `mygo native build`
   (`native.go`) builds the libraries of a package for every platform (or
-  `-target`'s, adding to the files already named) into
-  `.mygo/native/release`, copies them into the cache, where apps on the
-  machine find them before they are published, writes their entries into
-  `mygo-plugin.json`, and with `-upload` puts them on a GitHub release with
-  `gh`, not as the repository's latest. Package `ffi` (below) finds them
+  `-target`'s, adding to the files already named, and listing the
+  platforms that failed at the end) into `.mygo/native/release`, named
+  `<name>-<goos>-<goarch>-<sha256[:12]><ext>` so that a release never
+  replaces a file a published version of the package names, copies them
+  into the cache, where apps on the machine find them before they are
+  published, with `-upload` puts them on a GitHub release with `gh`, not
+  as the repository's latest, and then writes their entries into
+  `mygo-plugin.json`. Package `ffi` (below) finds them
   at run time. The CLI and the plugins
   download into that cache with `internal/download`: a 5xx, 408 or 429
   response, or a connection that fails or breaks off, is tried again

@@ -84,6 +84,14 @@ jobs:
             ${{ runner.os == 'Windows' && '~/AppData/Local' || runner.os == 'macOS' && '~/Library/Caches' || '~/.cache' }}/mygo/nsis-*
           key: ${{ steps.downloads.outputs.cache-primary-key }}
       - run: go test ./...
+      # A Rust crate that the CLI builds and package ffi binds, with the
+      # cargo of the runners' images, which go test ./... skips unbuilt.
+      - name: Test a native library built from its sources
+        env:
+          MYGO_NATIVE_TESTS: 1
+        run: |
+          go run ./cmd/mygo native build -target host examples/rust-native
+          go test -count=1 ./examples/rust-native/...
       - name: Test without the inspector, as production builds
         if: runner.os == 'Linux'
         run: go test -tags mygo_noinspector ./ui .

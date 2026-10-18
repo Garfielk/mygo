@@ -43,13 +43,15 @@ func cargoTriple(goos, goarch string) (string, error) {
 }
 
 // zigTriple returns the Zig target of goos/goarch: Linux libraries link
-// against the glibc of Debian 10 and Ubuntu 20.04, and run on later ones.
-func zigTriple(goos, goarch string) (string, error) {
+// against the glibc of Debian 10 and Ubuntu 20.04, and run on later ones,
+// and macOS libraries on macOS minMacOS and later ("" is 12.0), where Zig
+// would otherwise ask for the latest.
+func zigTriple(goos, goarch, minMacOS string) (string, error) {
 	arch := map[string]string{"amd64": "x86_64", "arm64": "aarch64"}[goarch]
 	switch {
 	case arch == "":
 	case goos == "darwin":
-		return arch + "-macos", nil
+		return arch + "-macos." + cmp.Or(minMacOS, "12.0"), nil
 	case goos == "linux":
 		return arch + "-linux-gnu.2.28", nil
 	case goos == "windows":
@@ -76,7 +78,7 @@ func buildNative(dir string, lib nativelib.Library, goos, goarch, minMacOS strin
 	if tool == "cargo" {
 		built, err = buildCargo(root, src, lib, goos, goarch, minMacOS)
 	} else {
-		built, err = buildZig(root, src, lib, goos, goarch)
+		built, err = buildZig(root, src, lib, goos, goarch, minMacOS)
 	}
 	var out string
 	if err == nil {
@@ -89,30 +91,54 @@ func buildNative(dir string, lib nativelib.Library, goos, goarch, minMacOS strin
 	return out, nil
 }
 
+// errMacOSOnly is the error of a Rust library for macOS built elsewhere.
+var errMacOSOnly = errors.New("Rust libraries for macOS link with Apple's SDK: build them on a Mac (mygo native build -target darwin-arm64,darwin-amd64)")
+
+// zigbuild reports whether cargo-zigbuild builds Rust libraries for
+// goos/goarch: it links Linux libraries against an old glibc, as
+// zigTriple, so that they load on older systems than the one building,
+// and other platforms' libraries, which cargo alone cannot link, but not
+// macOS's, which need Apple's SDK, nor Windows' on Windows, built with
+// MSVC.
+func zigbuild(goos, goarch string) bool {
+	if goos == "darwin" || goos == "windows" && runtime.GOOS == "windows" ||
+		goos == runtime.GOOS && goarch == runtime.GOARCH && goos != "linux" {
+		return false
+	}
+	_, err1 := exec.LookPath("cargo-zigbuild")
+	_, err2 := exec.LookPath("zig")
+	return err1 == nil && err2 == nil
+}
+
 // buildCargo builds the cdylib of the crate in src with cargo, or
-// cargo-zigbuild when it is installed and the target is Linux or another
-// platform, which cargo alone cannot link for.
+// cargo-zigbuild (see zigbuild).
 func buildCargo(root, src string, lib nativelib.Library, goos, goarch, minMacOS string) (string, error) {
 	triple, err := cargoTriple(goos, goarch)
 	if err != nil {
 		return "", err
 	}
+	if goos == "darwin" && runtime.GOOS != "darwin" {
+		return "", errMacOSOnly
+	}
 	if _, err := exec.LookPath("cargo"); err != nil {
 		return "", errors.New("cargo is not installed: get it from https://rustup.rs")
 	}
-	// cargo-zigbuild links Linux libraries against an old glibc, as
-	// zigTriple, so that they load on older systems than the one building.
 	cmd, target := "build", triple
-	if goos == "linux" || goos != runtime.GOOS || goarch != runtime.GOARCH {
-		if _, err := exec.LookPath("cargo-zigbuild"); err == nil {
-			cmd = "zigbuild"
-			if goos == "linux" {
-				target += ".2.28"
-			}
+	if zigbuild(goos, goarch) {
+		cmd = "zigbuild"
+		if goos == "linux" {
+			target += ".2.28"
 		}
 	}
 	manifest := filepath.Join(src, "Cargo.toml")
-	args := append([]string{cmd, "--lib", "--release", "--manifest-path", manifest, "--target", target, "--message-format=json-render-diagnostics"}, lib.Build.Args...)
+	args := []string{cmd, "--lib", "--manifest-path", manifest, "--target", target, "--message-format=json-render-diagnostics"}
+	// The release profile, unless the arguments pick another.
+	if !slices.ContainsFunc(lib.Build.Args, func(a string) bool {
+		return a == "--release" || a == "-r" || a == "--profile" || strings.HasPrefix(a, "--profile=")
+	}) {
+		args = append(args, "--release")
+	}
+	args = append(args, lib.Build.Args...)
 	c := exec.Command("cargo", args...)
 	c.Env = append(os.Environ(), "CARGO_TARGET_DIR="+filepath.Join(root, ".mygo", "native", "cargo"))
 	if goos == "darwin" {
@@ -124,8 +150,8 @@ func buildCargo(root, src string, lib nativelib.Library, goos, goarch, minMacOS 
 		msg := tail(stderr.String(), 40)
 		if strings.Contains(msg, "target may not be installed") {
 			msg += "\n\nInstall the target with: rustup target add " + triple
-		} else if cmd == "build" && (goos != runtime.GOOS || goarch != runtime.GOARCH) {
-			msg += "\n\ncargo-zigbuild (cargo install cargo-zigbuild) links for other platforms with Zig"
+		} else if cmd == "build" && goos != "windows" && (goos != runtime.GOOS || goarch != runtime.GOARCH) {
+			msg += "\n\ncargo-zigbuild (cargo install cargo-zigbuild, with Zig) links for other platforms"
 		}
 		return "", fmt.Errorf("cargo %s: %v\n%s", cmd, err, msg)
 	}
@@ -165,8 +191,8 @@ func buildCargo(root, src string, lib nativelib.Library, goos, goarch, minMacOS 
 
 // buildZig builds the package in src with zig build, which installs the
 // library into a prefix of its own.
-func buildZig(root, src string, lib nativelib.Library, goos, goarch string) (string, error) {
-	triple, err := zigTriple(goos, goarch)
+func buildZig(root, src string, lib nativelib.Library, goos, goarch, minMacOS string) (string, error) {
+	triple, err := zigTriple(goos, goarch, minMacOS)
 	if err != nil {
 		return "", err
 	}
@@ -177,8 +203,12 @@ func buildZig(root, src string, lib nativelib.Library, goos, goarch string) (str
 	if err := os.RemoveAll(prefix); err != nil {
 		return "", err
 	}
-	args := append([]string{"build", "-Dtarget=" + triple, "-Doptimize=ReleaseFast", "--prefix", prefix,
-		"--cache-dir", filepath.Join(root, ".mygo", "native", "zig-cache")}, lib.Build.Args...)
+	args := []string{"build", "-Dtarget=" + triple, "--prefix", prefix, "--cache-dir", filepath.Join(root, ".mygo", "native", "zig-cache")}
+	// ReleaseFast, unless the arguments pick another mode.
+	if !slices.ContainsFunc(lib.Build.Args, func(a string) bool { return strings.HasPrefix(a, "-Doptimize") }) {
+		args = append(args, "-Doptimize=ReleaseFast")
+	}
+	args = append(args, lib.Build.Args...)
 	c := exec.Command("zig", args...)
 	c.Dir = src
 	var out bytes.Buffer
@@ -217,8 +247,14 @@ func replaceFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp := dst + ".tmp"
+	f, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	f.Close()
 	if err := copyFile(src, tmp, 0o755); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, dst); err != nil {

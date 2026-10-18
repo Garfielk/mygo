@@ -25,7 +25,14 @@ in their mygo-plugin.json from their sources (a Rust crate with cargo, a
 Zig package with zig build) for every platform, and writes the published
 builds into mygo-plugin.json: their names, SHA-256 and URLs under the
 library's release. The files to publish go into .mygo/native/release of
-the module; -upload publishes them as the assets of a GitHub release.
+the module, named after their SHA-256 so that a release never replaces a
+file that published versions point at; -upload publishes them as the
+assets of a GitHub release, before writing mygo-plugin.json.
+
+Platforms that do not build here are reported, and left as they are in
+mygo-plugin.json: Rust libraries for macOS build on a Mac only, so build
+them there with -target darwin-arm64,darwin-amd64, and the others
+elsewhere; each run adds its platforms to the manifest.
 
 mygo dev and mygo build build the libraries of the app's own packages
 themselves; apps that use a package from the module cache download its
@@ -52,6 +59,9 @@ func runNative(args []string) error {
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
+	if flags.NArg() > 1 {
+		return fmt.Errorf("unexpected arguments %q: flags go before the directory (mygo native build [flags] [dir])", flags.Args()[1:])
+	}
 	dir, err := filepath.Abs(dirArg(flags.Args()))
 	if err != nil {
 		return err
@@ -68,73 +78,125 @@ func runNative(args []string) error {
 	if err != nil {
 		return err
 	}
-	var assets []string
-	uploads := map[string][]string{} // the files of each release
-	built := 0
+	var libs []*nativelib.Library
 	for _, p := range pkgs {
-		changed := false
+		for i := range p.manifest.Libraries {
+			if l := &p.manifest.Libraries[i]; l.Build != nil {
+				if *upload && cmp.Or(*release, l.Release) == "" {
+					return fmt.Errorf("-upload: %s has no release: name one with -release", l.Name)
+				}
+				libs = append(libs, l)
+			}
+		}
+	}
+	if len(libs) == 0 {
+		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"<dir>\"} or {\"zig\": \"<dir>\"})", pluginFile, dir)
+	}
+	if !host {
+		warnNativeRelease(pkgs, targets)
+	}
+
+	// Build every platform that builds here, then publish them, and only
+	// then name them in the manifests, so that these never point at files
+	// that are not there.
+	var assets, failed []string
+	uploads := map[string][]string{} // the files of each release
+	changed := map[string]bool{}     // the packages whose manifest to write
+	for _, p := range pkgs {
 		for i := range p.manifest.Libraries {
 			l := &p.manifest.Libraries[i]
 			if l.Build == nil {
 				continue
 			}
-			built++
+			r := cmp.Or(*release, l.Release)
 			for _, t := range targets {
 				goos, goarch, _ := strings.Cut(t, "-")
 				path, err := buildNative(p.dir, *l, goos, goarch, "")
+				if err == nil && !host {
+					var a string
+					var f nativelib.File
+					if a, f, err = publishNative(p.dir, *out, *l, path, goos, goarch, r); err == nil {
+						if l.Files == nil {
+							l.Files = map[string]nativelib.File{}
+						}
+						l.Files[t] = f
+						assets = append(assets, a)
+						if r != "" {
+							uploads[r] = append(uploads[r], a)
+						}
+					}
+				}
 				if err != nil {
-					return err
-				}
-				if host {
-					continue
-				}
-				a, f, err := publishNative(p.dir, *out, *l, path, goos, goarch, cmp.Or(*release, l.Release))
-				if err != nil {
-					return err
-				}
-				if l.Files == nil {
-					l.Files = map[string]nativelib.File{}
-				}
-				l.Files[t] = f
-				assets = append(assets, a)
-				if r := cmp.Or(*release, l.Release); r != "" {
-					uploads[r] = append(uploads[r], a)
+					if host {
+						return err
+					}
+					failed = append(failed, fmt.Sprintf("%s for %s: %v", l.Name, t, err))
 				}
 			}
 			if !host {
-				l.Release = cmp.Or(*release, l.Release)
-				if l.Release == "" {
-					logf("%s has no release: set it with -release so that apps can download the files", l.Name)
-				}
-				changed = true
+				l.Release = r
+				changed[p.dir] = true
 			}
 		}
-		if changed {
-			if err := writeManifest(filepath.Join(p.dir, pluginFile), p.manifest); err != nil {
-				return err
+	}
+	if host {
+		return nil
+	}
+	if len(assets) > 0 && *upload {
+		for r, files := range uploads {
+			if err := uploadNatives(r, files); err != nil {
+				return fmt.Errorf("%w\n%s is unchanged", err, pluginFile)
 			}
-			logf("Wrote %s", cyan(filepath.Join(p.dir, pluginFile)))
 		}
 	}
-	if built == 0 {
-		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"<dir>\"} or {\"zig\": \"<dir>\"})", pluginFile, dir)
-	}
-	if host || len(assets) == 0 {
-		return nil
-	}
-	if !*upload {
-		logf("Publish %s under the release of each library, or run again with -upload", cyan(filepath.Dir(assets[0])))
-		return nil
-	}
-	if len(uploads) == 0 {
-		return errors.New("-upload needs -release")
-	}
-	for r, files := range uploads {
-		if err := uploadNatives(r, files); err != nil {
+	for _, p := range pkgs {
+		if !changed[p.dir] || len(assets) == 0 {
+			continue
+		}
+		if err := writeManifest(filepath.Join(p.dir, pluginFile), p.manifest); err != nil {
 			return err
 		}
+		logf("Wrote %s", cyan(filepath.Join(p.dir, pluginFile)))
+	}
+	for _, l := range libs {
+		if l.Release == "" && len(assets) > 0 {
+			logf("%s has no release: set it with -release so that apps can download its files", l.Name)
+		}
+	}
+	if len(assets) > 0 && !*upload {
+		logf("Publish %s under the release of each library, or run again with -upload", cyan(filepath.Dir(assets[0])))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("not built, and left as they were in %s:\n%s", pluginFile, strings.Join(failed, "\n\n"))
 	}
 	return nil
+}
+
+// warnNativeRelease warns of what makes published libraries load on fewer
+// systems than they could, or a module that would commit the builds.
+func warnNativeRelease(pkgs []nativePackage, targets []string) {
+	linux := slices.ContainsFunc(targets, func(t string) bool { return strings.HasPrefix(t, "linux-") })
+	roots := map[string]bool{}
+	for _, p := range pkgs {
+		for _, l := range p.manifest.Libraries {
+			if l.Build == nil {
+				continue
+			}
+			if tool, _ := l.Build.Tool(); tool == "cargo" && linux && !zigbuild("linux", "amd64") {
+				logf("Without cargo-zigbuild (and Zig), %s's Linux libraries need the glibc of this machine or later: cargo install cargo-zigbuild", l.Name)
+				linux = false
+			}
+		}
+		root, err := nativelib.ModuleRoot(p.dir)
+		if err != nil || roots[root] {
+			continue
+		}
+		roots[root] = true
+		data, _ := os.ReadFile(filepath.Join(root, ".gitignore"))
+		if !strings.Contains(string(data), ".mygo") {
+			logf("Add .mygo/ to %s: the builds go into %s", filepath.Join(root, ".gitignore"), filepath.Join(root, ".mygo"))
+		}
+	}
 }
 
 // nativeTargets returns the platforms -target names.
@@ -170,7 +232,8 @@ func nativePackagesIn(dir string) ([]nativePackage, error) {
 }
 
 // publishNative copies a library built for goos/goarch into the directory
-// of the files to publish, as <name>-<goos>-<goarch><ext>, and into the
+// of the files to publish, as <name>-<goos>-<goarch>-<sha256[:12]><ext>,
+// and into the
 // user's cache, where apps on this machine find it before it is published,
 // and returns the copy and its entry in the manifest.
 func publishNative(dir, out string, l nativelib.Library, built, goos, goarch, release string) (string, nativelib.File, error) {
@@ -181,12 +244,22 @@ func publishNative(dir, out string, l nativelib.Library, built, goos, goarch, re
 		}
 		out = filepath.Join(root, ".mygo", "native", "release")
 	}
-	asset := filepath.Join(out, l.Name+"-"+goos+"-"+goarch+nativelib.Ext(goos))
-	if err := replaceFile(built, asset); err != nil {
+	// The SHA-256 is part of the name: a release never gets another file
+	// under a name that published versions of the package point at.
+	sum, err := fetch.FileSHA256(built)
+	if err != nil {
 		return "", nativelib.File{}, err
 	}
-	sum, err := fetch.FileSHA256(asset)
-	if err != nil {
+	prefix := filepath.Join(out, l.Name+"-"+goos+"-"+goarch+"-")
+	asset := prefix + sum[:12] + nativelib.Ext(goos)
+	// Earlier builds would be published again with this one.
+	old, _ := filepath.Glob(prefix + "*" + nativelib.Ext(goos))
+	for _, f := range old {
+		if f != asset {
+			os.Remove(f)
+		}
+	}
+	if err := replaceFile(built, asset); err != nil {
 		return "", nativelib.File{}, err
 	}
 	f := nativelib.File{Name: l.FileName(goos, goarch), SHA256: sum}
@@ -241,6 +314,7 @@ func uploadNatives(release string, files []string) error {
 			return fmt.Errorf("gh release create: %v\n%s", err, out)
 		}
 	}
+	// The files' names carry their SHA-256: one replaced is the same file.
 	slices.Sort(files)
 	t := con.start("Uploading " + uploadNames(files))
 	out, err := exec.Command(gh, append([]string{"release", "upload", tag, "--repo", repo, "--clobber"}, files...)...).CombinedOutput()

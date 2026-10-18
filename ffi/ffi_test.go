@@ -10,7 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/egoist/mygo/internal/nativelib"
 )
@@ -163,5 +166,57 @@ func TestPath(t *testing.T) {
 	unbuilt := []byte(`{"libraries": [{"name": "z", "build": {"zig": "."}}]}`)
 	if err := New("z", unbuilt).Load(); err == nil || errors.Is(err, errors.ErrUnsupported) && supported {
 		t.Errorf("Load = %v", err)
+	}
+}
+
+// TestBindConcurrently binds and calls from many goroutines at once, as
+// functions that call Bind before each use do; -race checks it.
+func TestBindConcurrently(t *testing.T) {
+	t.Setenv(EnvVar("c"), libc(t))
+	lib := New("c", nil)
+	var fns struct{ Abs func(int32) int32 }
+	abs := func(x int32) int32 {
+		if err := lib.Bind(&fns); err != nil {
+			t.Error(err)
+			return 0
+		}
+		return fns.Abs(x)
+	}
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Go(func() {
+			if got := abs(int32(-i)); got != int32(i) {
+				t.Errorf("abs(%d) = %d", -i, got)
+			}
+		})
+	}
+	wg.Wait()
+}
+
+func TestBindErrors(t *testing.T) {
+	t.Setenv(EnvVar("c"), libc(t))
+	var typo struct {
+		Abs func(int32) int32 `ffi:"abs,optinal"`
+	}
+	if err := New("c", nil).Bind(&typo); err == nil || !strings.Contains(err.Error(), "unknown option") {
+		t.Errorf("an unknown option: %v", err)
+	}
+	// An invalid manifest is reported even when the environment names the
+	// library.
+	if err := New("c", []byte(`{"libraries": [{"name": "c", "build": {}}]}`)).Load(); err == nil {
+		t.Error("loaded with an invalid manifest")
+	}
+	if err := New("d", []byte(`{"libraries": [{"name": "c"}]}`)).Load(); err == nil {
+		t.Error("loaded a library the manifest does not name")
+	}
+}
+
+func TestGoString(t *testing.T) {
+	b := []byte("hello\x00world")
+	if got := GoString(unsafe.Pointer(&b[0])); got != "hello" {
+		t.Errorf("GoString = %q", got)
+	}
+	if GoString(nil) != "" {
+		t.Error("GoString(nil)")
 	}
 }

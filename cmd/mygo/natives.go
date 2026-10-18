@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -62,11 +63,11 @@ func (c *Config) natives(goos, goarch string) ([]source, error) {
 			pick := func(goarch string) (string, string, error) {
 				target := goos + "-" + goarch
 				name := l.FileName(goos, goarch)
-				if l.Build != nil && p.local {
+				f, ok := l.Files[target]
+				if p.builds(l, ok) {
 					path, err := buildNative(p.dir, l, goos, goarch, c.MacOS.MinimumSystemVersion)
 					return name, path, err
 				}
-				f, ok := l.Files[target]
 				if !ok {
 					return "", "", fmt.Errorf("%s needs %s, which has no build for %s", p.dir, l.Name, strings.Replace(target, "-", "/", 1))
 				}
@@ -108,6 +109,26 @@ type nativePackage struct {
 	local bool
 }
 
+// builds reports whether the CLI builds l from its sources rather than
+// download its published file, which published says there is: when the
+// package is local and its sources are there (vendoring copies no more
+// than the package's directory), and their tool is installed or there is
+// nothing to download.
+func (p nativePackage) builds(l nativelib.Library, published bool) bool {
+	if l.Build == nil || !p.local {
+		return false
+	}
+	tool, dir := l.Build.Tool()
+	if _, err := os.Stat(filepath.Join(p.dir, filepath.FromSlash(dir))); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath(tool); err != nil && published {
+		logf("%s is not installed: %s gets the published build of %s, not one of its sources", tool, filepath.Base(p.dir), l.Name)
+		return false
+	}
+	return true
+}
+
 // nativePackages returns the packages of the app for goos/goarch that name
 // native libraries.
 func (c *Config) nativePackages(goos, goarch string) ([]nativePackage, error) {
@@ -143,7 +164,8 @@ func readNativePackages(dirs []string) ([]nativePackage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		local := modcache == "" || !strings.HasPrefix(dir, modcache+string(filepath.Separator))
+		local := (modcache == "" || !strings.HasPrefix(dir, modcache+string(filepath.Separator))) &&
+			!strings.Contains(dir+string(filepath.Separator), string(filepath.Separator)+"vendor"+string(filepath.Separator))
 		list = append(list, nativePackage{dir: dir, manifest: m, local: local})
 	}
 	return list, nil
@@ -166,7 +188,7 @@ func fetchNative(f nativelib.File) (string, error) {
 		return path, nil
 	}
 	if f.URL == "" {
-		return "", fmt.Errorf("%s is not published: run mygo native build", f.Name)
+		return "", fmt.Errorf("%s is not published yet: its package publishes it with mygo native build", f.Name)
 	}
 	t := con.start("Downloading " + f.Name)
 	err = fetch.Cached(context.Background(), downloadFile(t, f.URL, f.SHA256), path)

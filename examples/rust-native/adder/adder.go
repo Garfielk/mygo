@@ -4,9 +4,14 @@ package adder
 
 import (
 	_ "embed"
+	"unsafe"
 
 	"github.com/egoist/mygo/ffi"
 )
+
+// Builds the crate for go run and go test: go generate ./examples/rust-native/...
+//
+//go:generate go run ../../../cmd/mygo native build -target host .
 
 //go:embed mygo-plugin.json
 var manifest []byte
@@ -19,6 +24,8 @@ var fns struct {
 	Fibonacci   func(n uint32) uint64
 	CountVowels func(s string) uint32
 	Version     func() string `ffi:"adder_version"`
+	Greeting    func(name string) unsafe.Pointer
+	FreeString  func(s unsafe.Pointer)
 }
 
 // Load loads the library and binds its functions; the others need it.
@@ -35,3 +42,10 @@ func CountVowels(s string) uint32 { return fns.CountVowels(s) }
 
 // Version returns the crate's name and version.
 func Version() string { return fns.Version() }
+
+// Greeting returns a greeting of name, which the crate allocates and frees.
+func Greeting(name string) string {
+	p := fns.Greeting(name)
+	defer fns.FreeString(p)
+	return ffi.GoString(p)
+}

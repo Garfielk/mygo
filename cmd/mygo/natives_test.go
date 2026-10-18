@@ -188,7 +188,7 @@ func TestNativesFromSources(t *testing.T) {
 	}
 
 	// The same package in the module cache has no published build.
-	old, _ := goEnvCache.Load("GOMODCACHE")
+	old := goEnv("GOMODCACHE")
 	goEnvCache.Store("GOMODCACHE", dir)
 	defer goEnvCache.Store("GOMODCACHE", old)
 	if _, err := c.natives(runtime.GOOS, runtime.GOARCH); err == nil || !strings.Contains(err.Error(), "has no build for") {

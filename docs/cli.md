@@ -203,8 +203,10 @@ mygo native build [flags] [dir]
 Builds the [native libraries](native-libraries.md) that the packages in
 `dir` name in their `mygo-plugin.json` from their sources, with cargo or
 zig, for every platform, writes the files to publish into
-`.mygo/native/release` of the module and their names, URLs and SHA-256
-into `mygo-plugin.json`. `mygo dev` and `mygo build` build the libraries
+`.mygo/native/release` of the module, named after their SHA-256, and
+their names, URLs and SHA-256 into `mygo-plugin.json`. Platforms that do
+not build here (Rust's macOS libraries off a Mac) are listed at the end and
+left as they were. Flags go before the directory. `mygo dev` and `mygo build` build the libraries
 of the app's own packages themselves; this publishes those of a package
 for the apps of others, which then need neither Rust nor Zig.
 

@@ -1,7 +1,7 @@
 //! The functions the Go package adder binds with package ffi. They take and
 //! return what C does: integers, floats, pointers and NUL-terminated strings.
 
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, CStr, CString};
 
 #[no_mangle]
 pub extern "C" fn add(a: i32, b: i32) -> i32 {
@@ -31,4 +31,23 @@ pub extern "C" fn count_vowels(s: *const c_char) -> u32 {
 #[no_mangle]
 pub extern "C" fn adder_version() -> *const c_char {
     concat!("adder ", env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
+}
+
+/// Returns a string Rust allocates, which Go frees with free_string.
+#[no_mangle]
+pub extern "C" fn greeting(name: *const c_char) -> *mut c_char {
+    let name = if name.is_null() {
+        "".into()
+    } else {
+        unsafe { CStr::from_ptr(name) }.to_string_lossy()
+    };
+    CString::new(format!("Hello, {name}!")).unwrap_or_default().into_raw()
+}
+
+/// Frees a string greeting returned.
+#[no_mangle]
+pub extern "C" fn free_string(s: *mut c_char) {
+    if !s.is_null() {
+        drop(unsafe { CString::from_raw(s) });
+    }
 }

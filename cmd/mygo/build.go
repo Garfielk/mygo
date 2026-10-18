@@ -411,11 +411,16 @@ const inspectorTag = "mygo_noinspector"
 // production builds, as to look into one with DevToolsEnabled.
 func keepInspector() bool { return os.Getenv("MYGO_INSPECTOR") == "1" }
 
+// noDownloadTag leaves out of a build what downloads native libraries for
+// programs that are not packaged apps (package ffi's fetch.go), and HTTP
+// with it: packaged apps carry theirs.
+const noDownloadTag = "mygo_nodownload"
+
 // productionTags returns the -tags of a build: those GOFLAGS sets, which a
-// -tags flag would override, and the inspector's in a production build
-// unless it keeps it.
+// -tags flag would override, the downloader's, and the inspector's in a
+// production build unless it keeps it.
 func productionTags(debug bool) []string {
-	if debug || keepInspector() {
+	if debug {
 		return nil
 	}
 	var tags []string
@@ -424,7 +429,11 @@ func productionTags(debug bool) []string {
 			tags = append(tags, v)
 		}
 	}
-	return []string{"-tags", strings.Join(append(tags, inspectorTag), ",")}
+	tags = append(tags, noDownloadTag)
+	if !keepInspector() {
+		tags = append(tags, inspectorTag)
+	}
+	return []string{"-tags", strings.Join(tags, ",")}
 }
 
 // packageFlags are the -ldflags that link what mygo.json says about the app

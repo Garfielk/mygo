@@ -30,6 +30,10 @@
 //		return fns.Add(a, b), nil
 //	}
 //
+// Bind binds the functions once; calling it again, from any goroutine, only
+// returns the first call's result, cheaply, so functions call it before
+// using fns. Its success orders the binding before what follows it.
+//
 // Functions are called through purego (github.com/ebitengine/purego),
 // which converts their arguments and results as the C ABI of the platform
 // passes them: integers, floats, pointers, bools, strings (to and from
@@ -40,45 +44,65 @@
 package ffi
 
 import (
-	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 	"unicode"
+	"unsafe"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/internal/download"
 	"github.com/egoist/mygo/internal/nativelib"
 )
 
 // Library is a native library, loaded on first use. Its methods are safe
 // for concurrent use.
 type Library struct {
-	name     string
-	manifest []byte
+	name string
+	lib  nativelib.Library
+	bad  error // what is wrong with the manifest
 
 	once   sync.Once
 	handle uintptr
 	path   string
 	err    error
+
+	mu    sync.Mutex
+	bound sync.Map // the pointers Bind and BindFunc bound: their errors, or nil
 }
 
 // New returns the library named name in manifest, the content of the
-// package's mygo-plugin.json, or nil when the package names none, which
-// leaves the library to the app's resources, the executable's directory
-// and $MYGO_NATIVE_<NAME>.
+// package's mygo-plugin.json. A nil manifest leaves the library to
+// $MYGO_NATIVE_<NAME>, the app's resources, the executable's directory and
+// the CLI's builds (see Path). New only reads the manifest: the library is
+// loaded on first use, and an invalid manifest, or one that does not name
+// the library, is reported then.
 //
 // name is the library's name without its prefix and extension: "adder" is
 // libadder.dylib on macOS, libadder.so on Linux and adder.dll on Windows,
 // unless the manifest's files name others.
 func New(name string, manifest []byte) *Library {
-	return &Library{name: name, manifest: manifest}
+	l := &Library{name: name, lib: nativelib.Library{Name: name}}
+	if manifest != nil {
+		m, err := nativelib.Parse(manifest)
+		lib, ok := m.Lookup(name)
+		switch {
+		case err != nil:
+			l.bad = fmt.Errorf("ffi: %s: %w", nativelib.ManifestFile, err)
+		case !ok:
+			l.bad = fmt.Errorf("ffi: %s names no library %s", nativelib.ManifestFile, name)
+		default:
+			l.lib = lib
+		}
+	}
+	return l
 }
 
 // Name returns the library's name.
@@ -114,20 +138,13 @@ func EnvVar(name string) string {
 //
 // Packaged apps never download libraries: build them with the CLI.
 func (l *Library) Path() (string, error) {
+	if l.bad != nil {
+		return "", l.bad
+	}
 	if p := os.Getenv(EnvVar(l.name)); p != "" {
 		return filepath.Abs(p)
 	}
-	lib := nativelib.Library{Name: l.name}
-	if l.manifest != nil {
-		m, err := nativelib.Parse(l.manifest)
-		if err != nil {
-			return "", fmt.Errorf("ffi: %s: %w", nativelib.ManifestFile, err)
-		}
-		var ok bool
-		if lib, ok = m.Lookup(l.name); !ok {
-			return "", fmt.Errorf("ffi: %s names no library %s", nativelib.ManifestFile, l.name)
-		}
-	}
+	lib := l.lib
 	name := lib.FileName(runtime.GOOS, runtime.GOARCH)
 	var dirs []string
 	if dir, err := mygo.App.Path(mygo.PathResources); err == nil {
@@ -153,7 +170,7 @@ func (l *Library) Path() (string, error) {
 	f, ok := lib.Files[target]
 	if !ok {
 		if lib.Build != nil {
-			return "", fmt.Errorf("ffi: %s is not built for %s: run mygo native build -target host, or mygo dev", l.name, target)
+			return "", fmt.Errorf("ffi: %s is not built for %s: build it from its sources with mygo native build -target host (or run the app with mygo dev)", l.name, target)
 		}
 		return "", fmt.Errorf("ffi: %s has no build for %s", l.name, target)
 	}
@@ -161,16 +178,33 @@ func (l *Library) Path() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if download.Check(cached, f.SHA256) {
+	if sum, err := fileSHA256(cached); err == nil && sum == f.SHA256 {
 		return cached, nil
 	}
 	if f.URL == "" {
-		return "", fmt.Errorf("ffi: %s for %s is not published: run mygo native build", l.name, target)
+		return "", fmt.Errorf("ffi: the build of %s for %s is not published yet (mygo native build -release <url>)", l.name, target)
+	}
+	if fetch == nil {
+		return "", fmt.Errorf("ffi: %s is missing: this build of the program downloads no libraries; build it with mygo build", name)
 	}
 	if err := fetch(f, cached); err != nil {
 		return "", fmt.Errorf("ffi: downloading %s: %w", f.Name, err)
 	}
 	return cached, nil
+}
+
+// fileSHA256 returns the SHA-256 of a file, in hex.
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // localDirs returns where the CLI puts the libraries it builds in the module
@@ -219,23 +253,47 @@ func (l *Library) Symbol(name string) (uintptr, error) {
 		err = errors.New("not found")
 	}
 	if err != nil {
-		return 0, fmt.Errorf("ffi: %s has no symbol %s: %w", filepath.Base(l.path), name, err)
+		return 0, fmt.Errorf("ffi: %s has no symbol %s (%w): export it, as with #[no_mangle] pub extern \"C\" fn in Rust or export fn in Zig", filepath.Base(l.path), name, err)
 	}
 	return addr, nil
 }
 
 // BindFunc sets the function fptr points to to call the library's function
-// named name, loading the library.
+// named name, loading the library, once: later calls with the same pointer
+// return the first one's result.
 func (l *Library) BindFunc(fptr any, name string) error {
 	v := reflect.ValueOf(fptr)
 	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Func {
 		return fmt.Errorf("ffi: BindFunc needs a pointer to a function, not %T", fptr)
 	}
-	addr, err := l.Symbol(name)
-	if err != nil {
-		return err
+	return l.bindOnce(v.Pointer(), func() error {
+		addr, err := l.Symbol(name)
+		if err != nil {
+			return err
+		}
+		return register(fptr, addr, name)
+	})
+}
+
+// bindOnce runs bind once for the pointer p, and returns its error then and
+// on later calls, which do not lock once p is bound.
+func (l *Library) bindOnce(p uintptr, bind func() error) error {
+	if err, ok := l.bound.Load(p); ok {
+		return errOrNil(err)
 	}
-	return register(fptr, addr, name)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err, ok := l.bound.Load(p); ok {
+		return errOrNil(err)
+	}
+	err := bind()
+	l.bound.Store(p, err)
+	return err
+}
+
+func errOrNil(v any) error {
+	err, _ := v.(error)
+	return err
 }
 
 // Bind sets the function fields of the struct fns points to to call the
@@ -251,17 +309,22 @@ func (l *Library) BindFunc(fptr any, name string) error {
 //		Hidden  func()        `ffi:"-"`                       // left alone
 //	}
 //
-// Binding again, as on every call of a function that needs fns, does
-// nothing once all of them are bound.
+// It binds them once: later calls with the same pointer, from any
+// goroutine, return the first one's result without binding again, so
+// functions can call Bind before each use of fns. Fields bound before the
+// first call are left alone.
 func (l *Library) Bind(fns any) error {
 	v := reflect.ValueOf(fns)
 	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("ffi: Bind needs a pointer to a struct, not %T", fns)
 	}
+	return l.bindOnce(v.Pointer(), func() error { return l.bind(v.Elem()) })
+}
+
+func (l *Library) bind(s reflect.Value) error {
 	if err := l.Load(); err != nil {
 		return err
 	}
-	s := v.Elem()
 	for i := range s.NumField() {
 		field, fv := s.Type().Field(i), s.Field(i)
 		tag := field.Tag.Get("ffi")
@@ -269,6 +332,9 @@ func (l *Library) Bind(fns any) error {
 			continue
 		}
 		name, opts, _ := strings.Cut(tag, ",")
+		if opts != "" && opts != "optional" {
+			return fmt.Errorf("ffi: Bind: field %s of %s: unknown option %q in its tag, want optional", field.Name, s.Type(), opts)
+		}
 		if name == "" {
 			name = SnakeCase(field.Name)
 		}
@@ -289,6 +355,19 @@ func (l *Library) Bind(fns any) error {
 	return nil
 }
 
+// GoString returns a copy of the NUL-terminated C string p points to, ""
+// for nil: the library may free p afterwards.
+func GoString(p unsafe.Pointer) string {
+	if p == nil {
+		return ""
+	}
+	n := 0
+	for *(*byte)(unsafe.Add(p, n)) != 0 {
+		n++
+	}
+	return string(unsafe.Slice((*byte)(p), n))
+}
+
 // SnakeCase returns the name of the function Bind binds to a field without
 // a tag: AddNumbers is add_numbers, and ParseURL parse_url.
 func SnakeCase(name string) string {
@@ -306,11 +385,4 @@ func SnakeCase(name string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
-}
-
-// fetch downloads a published library into the user's cache.
-var fetch = func(f nativelib.File, path string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	return download.Cached(ctx, download.File{URL: f.URL, SHA256: f.SHA256}, path)
 }
