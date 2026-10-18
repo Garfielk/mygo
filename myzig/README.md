@@ -9,6 +9,8 @@ Step one is done: MyGo's `examples/counter-native` runs on MyZig on Linux and
 looks the same, pixel for pixel apart from sub-pixel text placement. Its
 numbers are in [Performance](#performance).
 
+![MyGo's counter-native and MyZig's counter, under Xvfb](docs/counter-mygo-vs-myzig.png)
+
 ```zig
 const Counter = struct {
     n: i64 = 0,
