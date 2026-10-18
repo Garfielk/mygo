@@ -307,18 +307,91 @@ macOS 12 and later.
 
 ## mygo-plugin.json
 
+The manifest sits next to the Go package that binds the libraries, which
+embeds it for `ffi.New`. The CLI finds it in every package an app imports.
+A library being published looks like this:
+
+```json
+{
+  "libraries": [
+    {
+      "name": "adder",
+      "build": { "cargo": "./rust", "args": ["--features", "simd"], "macOS": "13.0" },
+      "release": "https://github.com/me/adder/releases/download/adder-v1",
+      "files": {
+        "linux-amd64": {
+          "name": "libadder.so",
+          "url": "https://github.com/me/adder/releases/download/adder-v1/adder-linux-amd64-1a2b3c4d5e6f.so",
+          "sha256": "1a2b3c4d5e6f…",
+          "sourceHash": "9f8e7d6c5b4a…"
+        }
+      }
+    }
+  ]
+}
+```
+
+You write `name` and `build`. `mygo native build` writes `release` (from
+`-release`) and `files`.
+
+### name
+
+Identifies the library everywhere:
+
+- `ffi.New("adder", manifest)` finds the library's entry by it.
+- The library's files are named after it: `libadder.dylib`, `libadder.so`
+  and `adder.dll`. A leading `lib` is not doubled, and is dropped on
+  Windows, so `libghostty-vt` is `ghostty-vt.dll`. A file in `files` may
+  name itself otherwise.
+- `MYGO_NATIVE_ADDER` (`ffi.EnvVar`) names a file to load instead.
+- Published files are named after it: `adder-linux-amd64-<sha256>.so`.
+- An app ships one library of each name, even when several of its
+  packages name it.
+
+It may hold letters, digits, `-`, `_` and `.`.
+
+### build
+
+How to build the library from sources in the package's directory; leave
+it out for a library you publish by other means.
+
 | Field | |
 |---|---|
-| `libraries[].name` | the library: `ffi.New`'s name, and its files' (`lib<name>.dylib`, `lib<name>.so`, `<name>.dll`, a leading `lib` dropped on Windows) |
-| `libraries[].build.cargo` | the directory of the Rust crate, relative to the package, as `"./rust"` |
-| `libraries[].build.zig` | the directory of the Zig package, relative to the package, as `"./zig"` |
-| `libraries[].build.args` | more arguments of `cargo build` or `zig build` |
-| `libraries[].build.macOS` | the oldest macOS the library runs on, when later than the app's minimum or 12.0 |
-| `libraries[].release` | where the published files are |
-| `libraries[].files` | the published files by `GOOS-GOARCH`: `name`, `url`, `sha256` and the `sourceHash` of the sources they were built from, written by `mygo native build` |
-| `libraries[].source` | where the sources of the published files come from, for people |
+| `cargo` | the directory of a Rust crate (its `Cargo.toml`), as `"./rust"`, whose `crate-type` includes `"cdylib"` |
+| `zig` | the directory of a Zig package (its `build.zig`), as `"./zig"`, which installs a dynamic library |
+| `args` | more arguments of `cargo build` or `zig build`; one naming a profile (`--profile`) or an optimize mode (`-Doptimize=…`) replaces the release one |
+| `macOS` | the oldest macOS the library runs on, when it needs a later one than the app's minimum or 12.0 |
 
-A package may publish libraries without `build`, built by any means, by
-writing their `files` itself. The official plugins build theirs with Zig:
-[SQLite](plugins/sqlite.md) from its amalgamation, and the
+Name exactly one of `cargo` and `zig`. The directory must be inside the
+package. When the package is the app's own, or in a module the app
+replaces with a directory, `mygo dev` and `mygo build` build the library
+for each target, unless a published file was built from the sources as
+they are (see `files`).
+
+### release
+
+The URL of the directory the published files go into, as
+`https://github.com/<owner>/<repo>/releases/download/<tag>` for a GitHub
+release. `mygo native build -release <url>` sets it and later runs reuse
+it. Each file's `url` is `release` and the file's name, and `-upload`
+uploads the files to the release this URL names. Apps never read it:
+each file has its full `url`.
+
+### files
+
+The published builds, by `GOOS-GOARCH` (`darwin-arm64`, `linux-amd64`,
+`windows-arm64` …), which apps get when they do not build the library:
+
+| Field | |
+|---|---|
+| `name` | the file in apps, as `libadder.so` |
+| `url` | where to download it |
+| `sha256` | its SHA-256: a download that does not match is refused, and the file stays in the user's cache under it |
+| `sourceHash` | the hash of the sources it was built from: the build directory's files (but hidden ones and `target`, `zig-out`, `zig-pkg`, `node_modules`, with LF line endings), `args` and `macOS` |
+
+While `sourceHash` matches the sources, `mygo dev` and `mygo build` use
+the published file, and `mygo native build` skips that platform. A package
+may publish libraries without `build`, built by any means, by writing
+`files` itself, without `sourceHash`. The official plugins build theirs
+with Zig: [SQLite](plugins/sqlite.md) from its amalgamation, and the
 [terminal](plugins/terminal.md) from Ghostty's sources.

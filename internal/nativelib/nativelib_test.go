@@ -23,6 +23,8 @@ func TestParse(t *testing.T) {
 	for _, bad := range []string{
 		`{"libraries": [{"name": ""}]}`,
 		`{"libraries": [{"name": "../x"}]}`,
+		`{"libraries": [{"name": "my lib"}]}`,
+		`{"libraries": [{"name": ".hidden"}]}`,
 		`{"libraries": [{"name": "x"}, {"name": "x"}]}`,
 		`{"libraries": [{"name": "x", "build": {}}]}`,
 		`{"libraries": [{"name": "x", "build": {"cargo": "a", "zig": "b"}}]}`,

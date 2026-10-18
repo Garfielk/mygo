@@ -46,8 +46,6 @@ type Library struct {
 	// lib<name>.dylib, lib<name>.so and <name>.dll by default (a leading
 	// "lib" is not doubled, and dropped on Windows).
 	Name string `json:"name"`
-	// Source tells where the sources of the published files come from.
-	Source string `json:"source,omitempty"`
 	// Build builds the library from sources next to the package.
 	Build *Build `json:"build,omitempty"`
 	// Release is the URL of the directory the files are published in,
@@ -176,6 +174,10 @@ type File struct {
 	SourceHash string `json:"sourceHash,omitempty"`
 }
 
+// libraryName is what a library's name may be, as it names files and an
+// environment variable.
+var libraryName = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*$`)
+
 var macOSVersion = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
 
 // Targets are the platforms MyGo builds libraries for, as GOOS-GOARCH.
@@ -189,8 +191,8 @@ func Parse(data []byte) (Manifest, error) {
 	}
 	seen := map[string]bool{}
 	for _, l := range m.Libraries {
-		if !validName(l.Name) {
-			return m, fmt.Errorf("invalid library name %q", l.Name)
+		if !libraryName.MatchString(l.Name) {
+			return m, fmt.Errorf("invalid library name %q: use letters, digits, -, _ and .", l.Name)
 		}
 		if seen[l.Name] {
 			return m, fmt.Errorf("library %s is named twice", l.Name)

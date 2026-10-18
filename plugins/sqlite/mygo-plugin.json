@@ -2,7 +2,6 @@
   "libraries": [
     {
       "name": "mygo-sqlite3",
-      "source": "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip",
       "build": {
         "zig": "./native"
       },

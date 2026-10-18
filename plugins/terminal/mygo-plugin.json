@@ -2,7 +2,6 @@
   "libraries": [
     {
       "name": "libghostty-vt",
-      "source": "https://github.com/ghostty-org/ghostty/tree/befcdfd2c3a1cb24d9ec886e93c95b2b5daa7028",
       "build": {
         "zig": "./native",
         "macOS": "13.0"
