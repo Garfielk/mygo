@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +15,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egoist/mygo/ffi"
 	"github.com/egoist/mygo/internal/nativelib"
 )
 
@@ -178,16 +176,10 @@ func TestNativesFromSources(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "lib", "rust", "target")); err == nil {
 		t.Error("cargo wrote into the crate")
 	}
-	t.Setenv(ffi.EnvVar("adder"), want)
-	var fns struct{ Add func(a, b int32) int32 }
-	if err := ffi.New("adder", nil).Bind(&fns); err != nil {
-		if errors.Is(err, errors.ErrUnsupported) {
-			t.Skip(err)
-		}
+	if add, err := loadAdd(want); err != nil {
 		t.Fatal(err)
-	}
-	if got := fns.Add(40, 2); got != 42 {
-		t.Errorf("add(40, 2) = %d", got)
+	} else if add != nil && add(40, 2) != 42 {
+		t.Errorf("add(40, 2) = %d", add(40, 2))
 	}
 
 	// The same package in the module cache has no published build.
