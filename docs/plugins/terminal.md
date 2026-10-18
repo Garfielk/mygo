@@ -466,12 +466,13 @@ loads, and `$MYGO_GHOSTTY_VT` names another library.
 
 <!-- repository-only:start -->
 
-To build libghostty-vt from Ghostty's sources:
+libghostty-vt is built like any [native library](../native-libraries.md):
+the plugin's `native/` is a Zig package that pins a commit of Ghostty and
+installs its libghostty-vt. To build it, with Zig 0.16.0:
 
 ```sh
-git clone https://github.com/ghostty-org/ghostty && cd ghostty
-zig build -Demit-lib-vt -Doptimize=ReleaseFast
-MYGO_GHOSTTY_VT=$PWD/zig-out/lib/libghostty-vt.dylib go run ./examples/terminal
+go run ./cmd/mygo native build -target host ./plugins/terminal
+go run ./examples/terminal
 ```
 
 <!-- repository-only:end -->

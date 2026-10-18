@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"cmp"
+	"debug/elf"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,7 +66,8 @@ func zigTriple(goos, goarch, minMacOS string) (string, error) {
 // from its sources for goos/goarch, and returns the built file, in the
 // module's .mygo/native/<goos>-<goarch> (nativelib.LocalDir), where
 // programs that are not packaged apps find it too. macOS libraries support
-// macOS minMacOS and later ("" is 12.0). cargo and zig build only what
+// macOS minMacOS ("" is 12.0) or the library's minimum, the later, and
+// later ones. cargo and zig build only what
 // changed, so building again is quick.
 func buildNative(dir string, lib nativelib.Library, goos, goarch, minMacOS string) (string, error) {
 	root, err := nativelib.ModuleRoot(dir)
@@ -73,6 +76,7 @@ func buildNative(dir string, lib nativelib.Library, goos, goarch, minMacOS strin
 	}
 	tool, src := lib.Build.Tool()
 	src = filepath.Join(dir, filepath.FromSlash(src))
+	minMacOS = lib.Build.MinMacOS(minMacOS)
 	t := con.start(fmt.Sprintf("Building %s for %s/%s with %s", lib.Name, goos, goarch, tool))
 	var built string
 	if tool == "cargo" {
@@ -81,6 +85,9 @@ func buildNative(dir string, lib nativelib.Library, goos, goarch, minMacOS strin
 		built, err = buildZig(root, src, lib, goos, goarch, minMacOS)
 	}
 	var out string
+	if err == nil && goos == "linux" {
+		built, err = stripELF(built, filepath.Join(root, ".mygo", "native", "stripped", lib.Name+"-"+goarch+".so"))
+	}
 	if err == nil {
 		out = filepath.Join(nativelib.LocalDir(root, goos, goarch), lib.FileName(goos, goarch))
 		err = replaceFile(built, out)
@@ -257,6 +264,11 @@ func replaceFile(src, dst string) error {
 		os.Remove(tmp)
 		return err
 	}
+	// CreateTemp made it 0600, which copyFile keeps.
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
 		return err
@@ -280,4 +292,66 @@ func tail(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// stripELF writes a copy of the ELF library at path to out without the
+// contents of its debug sections, as `strip --strip-debug` would, and
+// returns out, or path when it has none: Zig keeps the debug information
+// of libraries that ask to be stripped, as Ghostty's, four fifths of them.
+// What loading uses (the segments, and the sections in them) stays in
+// place; the other sections after the segments move down, and the debug
+// sections keep their headers, empty, so that no index changes.
+func stripELF(path, out string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	f, err := elf.NewFile(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	if f.Class != elf.ELFCLASS64 || f.Data != elf.ELFDATA2LSB {
+		return "", fmt.Errorf("%s: not a 64-bit little-endian ELF file", path)
+	}
+	debug := slices.ContainsFunc(f.Sections, func(s *elf.Section) bool {
+		return s.FileSize > 0 && (strings.HasPrefix(s.Name, ".debug") || strings.HasPrefix(s.Name, ".zdebug"))
+	})
+	if !debug {
+		return path, nil
+	}
+	end := uint64(0)
+	for _, p := range f.Progs {
+		end = max(end, p.Off+p.Filesz)
+	}
+	stripped := append([]byte(nil), data[:end]...)
+	le := binary.LittleEndian
+	shoff := le.Uint64(data[0x28:])
+	shentsize, shnum := uint64(le.Uint16(data[0x3a:])), uint64(le.Uint16(data[0x3c:]))
+	headers := append([]byte(nil), data[shoff:shoff+shentsize*shnum]...)
+	for i, s := range f.Sections {
+		h := headers[uint64(i)*shentsize:]
+		if s.Type == elf.SHT_NULL || s.Type == elf.SHT_NOBITS || s.Flags&elf.SHF_ALLOC != 0 || s.Offset < end {
+			continue
+		}
+		size := s.FileSize
+		if strings.HasPrefix(s.Name, ".debug") || strings.HasPrefix(s.Name, ".zdebug") {
+			size = 0
+		}
+		align := max(s.Addralign, 1)
+		for uint64(len(stripped))%align != 0 {
+			stripped = append(stripped, 0)
+		}
+		le.PutUint64(h[0x18:], uint64(len(stripped))) // sh_offset
+		le.PutUint64(h[0x20:], size)                  // sh_size
+		stripped = append(stripped, data[s.Offset:s.Offset+size]...)
+	}
+	for len(stripped)%8 != 0 {
+		stripped = append(stripped, 0)
+	}
+	le.PutUint64(stripped[0x28:], uint64(len(stripped))) // e_shoff
+	stripped = append(stripped, headers...)
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return "", err
+	}
+	return out, os.WriteFile(out, stripped, 0o755)
 }

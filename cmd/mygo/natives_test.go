@@ -187,7 +187,45 @@ func TestNativesFromSources(t *testing.T) {
 		t.Errorf("add(40, 2) = %d", add(40, 2))
 	}
 
+	// A published build of these sources serves the app instead, until the
+	// sources change.
+	built, err := os.ReadFile(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(built) }))
+	defer srv.Close()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LocalAppData", t.TempDir())
+	if runtime.GOOS == "darwin" {
+		t.Setenv("HOME", t.TempDir())
+	}
+	build := &nativelib.Build{Cargo: "./rust"}
+	sources, err := nativelib.SourceHash(filepath.Join(dir, "lib", "rust"), build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(built)
+	manifest := nativelib.Manifest{Libraries: []nativelib.Library{{Name: "adder", Build: build, Files: map[string]nativelib.File{
+		runtime.GOOS + "-" + runtime.GOARCH: {Name: filepath.Base(want), URL: srv.URL, SHA256: hex.EncodeToString(sum[:]), SourceHash: sources},
+	}}}}
+	if err := writeManifest(filepath.Join(dir, "lib", pluginFile), manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(want); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := c.natives(runtime.GOOS, runtime.GOARCH); err != nil || len(list) != 1 || list[0].path == want {
+		t.Fatalf("with a published build of the sources, natives = %+v, %v", list, err)
+	}
+	writeFiles(t, dir, map[string]string{"lib/rust/src/lib.rs": "#[no_mangle]\npub extern \"C\" fn add(a: i32, b: i32) -> i32 { a.wrapping_add(b) }\n"})
+	if list, err := c.natives(runtime.GOOS, runtime.GOARCH); err != nil || len(list) != 1 || list[0].path != want {
+		t.Fatalf("with changed sources, natives = %+v, %v", list, err)
+	}
+
 	// The same package in the module cache has no published build.
+	writeFiles(t, dir, map[string]string{"lib/" + pluginFile: `{"libraries": [{"name": "adder", "build": {"cargo": "./rust"}}]}`})
 	old := goEnv("GOMODCACHE")
 	goEnvCache.Store("GOMODCACHE", dir)
 	defer goEnvCache.Store("GOMODCACHE", old)

@@ -34,6 +34,11 @@ mygo-plugin.json: Rust libraries for macOS build on a Mac only, so build
 them there with -target darwin-arm64,darwin-amd64, and the others
 elsewhere; each run adds its platforms to the manifest.
 
+Each file records the hash of the sources it was built from: platforms
+whose files were built from the sources as they are are skipped (-force
+builds them again), and mygo dev and mygo build use those files instead of
+building the library, which they do once its sources changed.
+
 mygo dev and mygo build build the libraries of the app's own packages
 themselves; apps that use a package from the module cache download its
 published builds instead, so they need neither Rust nor Zig.
@@ -56,6 +61,7 @@ func runNative(args []string) error {
 	release := flags.String("release", "", "the URL the files are published under, as https://github.com/<owner>/<repo>/releases/download/<tag>\n(default: the library's release in mygo-plugin.json)")
 	out := flags.String("out", "", "the directory of the files to publish (default: .mygo/native/release in the module)")
 	upload := flags.Bool("upload", false, "upload the files to the GitHub release of -release with the GitHub CLI")
+	force := flags.Bool("force", false, "build the platforms whose published files were built from these sources too")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -109,8 +115,19 @@ func runNative(args []string) error {
 				continue
 			}
 			r := cmp.Or(*release, l.Release)
+			_, d := l.Build.Tool()
+			src := filepath.Join(p.dir, filepath.FromSlash(d))
+			before, err := nativelib.SourceHash(src, l.Build)
+			if err != nil {
+				return err
+			}
+			built := map[string]bool{} // the platforms this run publishes
 			for _, t := range targets {
 				goos, goarch, _ := strings.Cut(t, "-")
+				if f, ok := l.Files[t]; ok && !host && !*force && f.SourceHash == before {
+					logf("%s for %s is published from these sources", l.Name, t)
+					continue
+				}
 				path, err := buildNative(p.dir, *l, goos, goarch, "")
 				if err == nil && !host {
 					var a string
@@ -120,6 +137,7 @@ func runNative(args []string) error {
 							l.Files = map[string]nativelib.File{}
 						}
 						l.Files[t] = f
+						built[t] = true
 						assets = append(assets, a)
 						if r != "" {
 							uploads[r] = append(uploads[r], a)
@@ -134,6 +152,17 @@ func runNative(args []string) error {
 				}
 			}
 			if !host {
+				// After the builds, which may write into the sources, as
+				// cargo its Cargo.lock.
+				h, err := nativelib.SourceHash(src, l.Build)
+				if err != nil {
+					return err
+				}
+				for t := range built {
+					f := l.Files[t]
+					f.SourceHash = h
+					l.Files[t] = f
+				}
 				l.Release = r
 				changed[p.dir] = true
 			}

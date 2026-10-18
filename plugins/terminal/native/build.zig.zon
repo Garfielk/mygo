@@ -1,0 +1,13 @@
+.{
+    .name = .mygo_ghostty_vt,
+    .version = "0.0.0",
+    .fingerprint = 0x2c2ade92919e219e,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .ghostty = .{
+            .url = "git+https://github.com/ghostty-org/ghostty#befcdfd2c3a1cb24d9ec886e93c95b2b5daa7028",
+            .hash = "ghostty-1.3.2-dev-5UdBCz0neAWvtgBNgbI7B1leCWOke-yNiz2wx224-wKi",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon" },
+}

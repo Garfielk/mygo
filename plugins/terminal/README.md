@@ -18,9 +18,18 @@ mygo.NewWindow(mygo.WindowOptions{Title: "Terminal", Content: ui.View(func(c *ui
 See [the documentation](../../docs/plugins/terminal.md), and
 `examples/terminal` for an app.
 
-`go generate` here builds libghostty-vt for every platform with Zig, from
-the commit of Ghostty in `internal/libbuild`, into `build/`, and writes
-`mygo-plugin.json`, which names the files and their SHA-256 for the CLI and
-this package: publish them as the assets of the release that file points
-at. It writes `ghostty_themes.go` too, the themes that Ghostty ships, which
-`go run ./internal/libbuild -themes` writes alone, without Zig.
+libghostty-vt is built by MyGo's pipeline for
+[native libraries](../../docs/native-libraries.md): `native/` is a Zig
+package that pins the commit of Ghostty in `build.zig.zon` and installs its
+libghostty-vt, and `mygo-plugin.json` names it with its published builds.
+Apps get the published builds until `native/` changes; then `mygo dev` and
+`mygo build` build it, with the Zig version Ghostty asks for (0.16.0).
+
+`go generate` here runs `mygo native build`, which builds it for every
+platform that is not published from these sources yet and writes
+`mygo-plugin.json` (publish the files with `-upload`, or as the assets of
+the release it names), and writes `ghostty_themes.go`, the themes that
+Ghostty ships, which `go run ./internal/themes` writes alone, without Zig.
+To bind another commit of Ghostty, change it in `native/build.zig.zon`
+(`zig fetch --save=ghostty "git+https://github.com/ghostty-org/ghostty#<commit>"`),
+and name a new release in `mygo-plugin.json`.

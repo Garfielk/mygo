@@ -960,16 +960,17 @@ build` like mygo-runtime and released with the same version.
   in another language than the window. The page reports the width its
   buttons need too, as translations can be long.
 
-- **sqlite** compiles SQLite's pinned C amalgamation with Zig 0.16 and
-  loads it through purego. A C shim passes doubles as bits on every ABI,
+- **sqlite** compiles SQLite's C amalgamation, which `native/build.zig.zon`
+  pins by its hash, with Zig 0.16 (a native library with `build`, see the
+  CLI's resources) and loads it through purego. A C shim passes doubles as bits on every ABI,
   binds a per-operation atomic cancellation token to progress and busy
   handlers, and authorizes SQL without Go callbacks. Connections serialize
   operations; transactions hold one connection through BEGIN IMMEDIATE,
   COMMIT or rollback. The page client preserves int64 and BLOB values with
   tagged cells and confines database files to the Go-configured directory.
   Connections belong to their page and close on navigation or app quit.
-  `mygo-plugin.json` names the six native-library assets, which the CLI
-  bundles like libghostty-vt, with checksums for the library assets. Go and native UI apps can also open connections directly.
+  `mygo-plugin.json` names the six published builds, which the CLI
+  bundles like libghostty-vt. Go and native UI apps can also open connections directly.
 - **watch** gives pages `mygo.WatchFiles` watches of the directories and
   files the app names, by their names (`Roots`, or `Resolve` for those
   granted while it runs). `Watch` streams a part per batch through a
@@ -1052,11 +1053,16 @@ build` like mygo-runtime and released with the same version.
     it) is queued instead: the binding holds the library's own refusal
     back, and the view, on the main thread, reads the clipboard and
     writes the answer, which the reader's lock makes safe.
-  - *Shipping the library.* `mygo-plugin.json` names its build for each
-    platform, published as release assets with their SHA-256 checksums.
-    The CLI puts them into apps
-    (see the CLI's resources); other programs download theirs into the
-    user's cache once, which packaged apps never do.
+  - *Shipping the library.* `native/` is a Zig package whose
+    `build.zig.zon` pins Ghostty at a commit and whose `build.zig` installs
+    its `ghostty-vt` artifact (`emit-lib-vt`, stripped), built like any
+    native library with `build` (needing macOS 13, `"macOS": "13.0"`).
+    `mygo-plugin.json` names its build for each platform, published as
+    release assets with their SHA-256 and source hashes. The CLI puts them
+    into apps (see the CLI's resources); other programs download theirs
+    into the user's cache once, which packaged apps never do.
+    `internal/themes` writes `ghostty_themes.go` from the themes archive
+    the pinned Ghostty names.
 - **game** has what games need beyond what apps do, opt-in, out of core
   `ui`, on its public API only. `View` is a focusable box that keeps its
   loop in `ui.Local`: its input handler gathers keys (by `PhysicalKey`),
@@ -3596,16 +3602,20 @@ renderer's (`gputest.Compare`).
   libghostty-vt: `go list -deps` of the target finds them. A library with
   `build` in a package outside the module cache and `vendor` (the app's
   own, or a module replaced by a directory) whose sources are there is
-  built for the target (`nativebuild.go`; its published file instead when
-  the tool is missing) into `.mygo/native/<goos>-<goarch>` of its module,
+  built for the target (`nativebuild.go`), unless its published file for
+  the target was built from these sources (its `sourceHash`, the
+  SHA-256 of the build directory's files but `nativelib.Skipped` ones,
+  with LF line endings, its `args` and `macOS`) or the tool is missing, into `.mygo/native/<goos>-<goarch>` of its module,
   cargo with `CARGO_TARGET_DIR` and zig with `--prefix` and `--cache-dir`
   under `.mygo/native` too, so that builds write nothing into the sources
   but cargo's `Cargo.lock`. cargo-zigbuild, when installed with Zig, links
   Linux (against glibc 2.28, as Zig does) and other platforms' libraries
   but macOS's, which need Apple's SDK and so a Mac, and Windows' on
-  Windows (MSVC). macOS libraries get the app's minimum version
-  (`MACOSX_DEPLOYMENT_TARGET`, Zig's `-macos.<version>` target, without
-  which Zig asks for the latest macOS). cargo's JSON messages name the crate's
+  Windows (MSVC). macOS libraries get the app's minimum version or the
+  library's `macOS`, the later (`MACOSX_DEPLOYMENT_TARGET`, Zig's
+  `-macos.<version>` target, without which Zig asks for the latest macOS).
+  Linux libraries lose the contents of their debug sections (`stripELF`),
+  which Zig keeps in libraries that ask to be stripped. cargo's JSON messages name the crate's
   cdylib; zig's prefix is searched for the one library it installed. Both
   build incrementally, so `mygo dev` builds on every rebuild, and watches
   the sources (but `target`, `zig-out` and hidden directories). Other
@@ -3614,8 +3624,9 @@ renderer's (`gputest.Compare`).
   installed at the top of the resources like a listed resource, both
   architectures of a universal app combined. `mygo native build`
   (`native.go`) builds the libraries of a package for every platform (or
-  `-target`'s, adding to the files already named, and listing the
-  platforms that failed at the end) into `.mygo/native/release`, named
+  `-target`'s, adding to the files already named, skipping those whose
+  file was built from the sources as they are unless `-force`, and
+  listing the platforms that failed at the end) into `.mygo/native/release`, named
   `<name>-<goos>-<goarch>-<sha256[:12]><ext>` so that a release never
   replaces a file a published version of the package names, copies them
   into the cache, where apps on the machine find them before they are

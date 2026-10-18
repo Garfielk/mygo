@@ -52,3 +52,20 @@ func TestFileName(t *testing.T) {
 		}
 	}
 }
+
+func TestMinMacOS(t *testing.T) {
+	for _, c := range []struct{ app, lib, want string }{
+		{"", "", "12.0"},
+		{"", "13.0", "13.0"},
+		{"14.0", "13.0", "14.0"},
+		{"13.2", "13.10", "13.10"},
+		{"15", "", "15"},
+	} {
+		if got := (&Build{MacOS: c.lib}).MinMacOS(c.app); got != c.want {
+			t.Errorf("MinMacOS(%q) with %q = %q, want %q", c.app, c.lib, got, c.want)
+		}
+	}
+	if _, err := Parse([]byte(`{"libraries": [{"name": "x", "build": {"zig": ".", "macOS": "13; rm"}}]}`)); err == nil {
+		t.Error("accepted an invalid macOS version")
+	}
+}

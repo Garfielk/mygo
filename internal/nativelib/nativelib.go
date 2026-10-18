@@ -18,13 +18,17 @@
 package nativelib
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -65,6 +69,91 @@ type Build struct {
 	Zig string `json:"zig,omitempty"`
 	// Args are more arguments of `cargo build` or `zig build`.
 	Args []string `json:"args,omitempty"`
+	// MacOS is the oldest macOS the library runs on, when it needs a later
+	// one than the app's minimum or 12.0, as "13.0".
+	MacOS string `json:"macOS,omitempty"`
+}
+
+// MinMacOS returns the macOS a build for an app whose minimum is app ("" is
+// 12.0) targets: the later of app's and the library's.
+func (b *Build) MinMacOS(app string) string {
+	v := app
+	if v == "" {
+		v = "12.0"
+	}
+	if b != nil && b.MacOS != "" && versionLess(v, b.MacOS) {
+		return b.MacOS
+	}
+	return v
+}
+
+// versionLess reports whether the version a is older than b, as 12.0 than
+// 13.0 and 13.2 than 13.10.
+func versionLess(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := range max(len(as), len(bs)) {
+		var x, y int
+		if i < len(as) {
+			x, _ = strconv.Atoi(as[i])
+		}
+		if i < len(bs) {
+			y, _ = strconv.Atoi(bs[i])
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return false
+}
+
+// Skipped reports whether a file or directory of a library's sources is
+// left out of them: hidden ones, and those cargo, zig and npm write
+// (target, zig-out, zig-cache, zig-pkg, node_modules).
+func Skipped(name string) bool {
+	switch name {
+	case "target", "zig-out", "zig-cache", "zig-pkg", "node_modules":
+		return true
+	}
+	return strings.HasPrefix(name, ".")
+}
+
+// SourceHash returns the hash of the sources of a library built in dir
+// (the build's directory), which its arguments and macOS version are part
+// of: the SHA-256 of the paths and contents of its files, but Skipped
+// ones, with line endings as LF, so that checkouts on every platform agree.
+func SourceHash(dir string, b *Build) (string, error) {
+	h := sha256.New()
+	fmt.Fprintf(h, "%q %q\n", b.Args, b.MacOS)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != dir && Skipped(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+		fmt.Fprintf(h, "%s\n%d\n", filepath.ToSlash(rel), len(data))
+		h.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // Tool returns the build's tool, "cargo" or "zig", and its directory.
@@ -80,7 +169,14 @@ type File struct {
 	Name   string `json:"name"`
 	URL    string `json:"url,omitempty"`
 	SHA256 string `json:"sha256"`
+	// SourceHash is the hash of the sources the file was built from (see
+	// SourceHash): the CLI builds the library of a local package from its
+	// sources only when they changed since, so that the package's own
+	// published files serve it until then, without Rust or Zig.
+	SourceHash string `json:"sourceHash,omitempty"`
 }
+
+var macOSVersion = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
 
 // Targets are the platforms MyGo builds libraries for, as GOOS-GOARCH.
 var Targets = []string{"darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64", "windows-amd64", "windows-arm64"}
@@ -106,6 +202,9 @@ func Parse(data []byte) (Manifest, error) {
 			}
 			if _, dir := b.Tool(); filepath.IsAbs(dir) || !filepath.IsLocal(filepath.FromSlash(dir)) {
 				return m, fmt.Errorf("library %s: the build's directory %q is not inside the package", l.Name, dir)
+			}
+			if b.MacOS != "" && !macOSVersion.MatchString(b.MacOS) {
+				return m, fmt.Errorf("library %s: invalid macOS version %q, want one as \"13.0\"", l.Name, b.MacOS)
 			}
 		}
 		for target, f := range l.Files {

@@ -64,7 +64,7 @@ func (c *Config) natives(goos, goarch string) ([]source, error) {
 				target := goos + "-" + goarch
 				name := l.FileName(goos, goarch)
 				f, ok := l.Files[target]
-				if p.builds(l, ok) {
+				if p.builds(l, f, ok) {
 					path, err := buildNative(p.dir, l, goos, goarch, c.MacOS.MinimumSystemVersion)
 					return name, path, err
 				}
@@ -109,20 +109,29 @@ type nativePackage struct {
 	local bool
 }
 
-// builds reports whether the CLI builds l from its sources rather than
-// download its published file, which published says there is: when the
-// package is local and its sources are there (vendoring copies no more
-// than the package's directory), and their tool is installed or there is
-// nothing to download.
-func (p nativePackage) builds(l nativelib.Library, published bool) bool {
+// builds reports whether the CLI builds l for a platform from its sources
+// rather than use its published file f, which ok says there is: when the
+// package is local, its sources are there (vendoring copies no more than
+// the package's directory) and are not those f was built from, and their
+// tool is installed or there is nothing to use instead.
+func (p nativePackage) builds(l nativelib.Library, f nativelib.File, ok bool) bool {
 	if l.Build == nil || !p.local {
 		return false
 	}
 	tool, dir := l.Build.Tool()
-	if _, err := os.Stat(filepath.Join(p.dir, filepath.FromSlash(dir))); err != nil {
+	src := filepath.Join(p.dir, filepath.FromSlash(dir))
+	if _, err := os.Stat(src); err != nil {
 		return false
 	}
-	if _, err := exec.LookPath(tool); err != nil && published {
+	if !ok {
+		return true
+	}
+	if f.SourceHash != "" {
+		if h, err := nativelib.SourceHash(src, l.Build); err == nil && h == f.SourceHash {
+			return false
+		}
+	}
+	if _, err := exec.LookPath(tool); err != nil {
 		logf("%s is not installed: %s gets the published build of %s, not one of its sources", tool, filepath.Base(p.dir), l.Name)
 		return false
 	}

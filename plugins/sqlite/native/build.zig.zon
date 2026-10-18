@@ -1,0 +1,14 @@
+.{
+    .name = .mygo_sqlite3,
+    .version = "3.53.4",
+    .fingerprint = 0x87107f868be5dd4b,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .sqlite = .{
+            // SQLite's amalgamation, which Zig checks against the hash.
+            .url = "https://www.sqlite.org/2026/sqlite-amalgamation-3530400.zip",
+            .hash = "N-V-__8AAGVtrgCcOcmjrOJnagmnRyMrcKaOo09KbU-vu8w8",
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "sqlite.c" },
+}

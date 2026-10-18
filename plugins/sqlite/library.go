@@ -12,7 +12,7 @@ import (
 	"github.com/egoist/mygo/ffi"
 )
 
-//go:generate go run ./internal/libbuild
+//go:generate go run ../../cmd/mygo native build .
 
 //go:embed mygo-plugin.json
 var natives []byte

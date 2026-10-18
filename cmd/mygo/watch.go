@@ -250,7 +250,7 @@ func snapshot(in *buildInputs) map[string]string {
 			switch {
 			case err != nil:
 				s[path] = "-"
-			case path != dir && (hiddenName(d.Name()) || d.IsDir() && buildOutputDir(d.Name())):
+			case path != dir && nativelib.Skipped(d.Name()):
 				if d.IsDir() {
 					return filepath.SkipDir
 				}
@@ -263,13 +263,6 @@ func snapshot(in *buildInputs) map[string]string {
 		})
 	}
 	return s
-}
-
-// buildOutputDir reports whether a directory of a native library's sources
-// is where cargo, zig or npm write, which builds of the CLI leave alone
-// but builds by hand may fill.
-func buildOutputDir(name string) bool {
-	return name == "target" || name == "zig-out" || name == "zig-cache" || name == "node_modules"
 }
 
 // readDir is os.ReadDir, but lets others delete the directory while it

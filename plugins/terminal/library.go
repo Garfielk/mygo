@@ -10,7 +10,8 @@ import (
 	"github.com/egoist/mygo/plugins/terminal/internal/vt"
 )
 
-//go:generate go run ./internal/libbuild
+//go:generate go run ../../cmd/mygo native build .
+//go:generate go run ./internal/themes
 
 // natives describes the builds of libghostty-vt this package binds, one
 // per platform, which `mygo build` and `mygo dev` put into apps: the CLI

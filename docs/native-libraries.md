@@ -107,16 +107,24 @@ pub fn build(b: *std.Build) void {
 ```
 
 The CLI runs `zig build -Dtarget=<target> -Doptimize=ReleaseFast` in that
-directory, and cargo with `--release`. A `build.zig` that compiles C sources (`addCSourceFiles`) binds
+directory, and cargo with `--release`. Zig 0.16 keeps the packages a
+`build.zig.zon` fetches in `zig-pkg/` there: add it to `.gitignore`. A
+Zig package whose `build.zig.zon` pins another (a library's sources, as
+Ghostty's for the [terminal plugin](plugins/terminal.md)) builds it the
+same way. A `build.zig` that compiles C sources (`addCSourceFiles`) binds
 a C library the same way, as the [SQLite plugin](plugins/sqlite.md) does.
 
 `"args"` adds arguments to `cargo build` or `zig build`, and replaces the
 release profile or the optimize mode when it names one (`--profile`,
-`-Doptimize=ReleaseSmall`):
+`-Doptimize=ReleaseSmall`), and `"macOS"` names the oldest macOS a library
+runs on when it needs a later one than the app's minimum or 12:
 
 ```json
-{ "name": "adder", "build": { "cargo": "./rust", "args": ["--features", "simd"] } }
+{ "name": "adder", "build": { "cargo": "./rust", "args": ["--features", "simd"], "macOS": "13.0" } }
 ```
+
+Linux libraries lose their debug information, which Zig keeps even in
+libraries that ask to be stripped.
 
 ## Binding functions
 
@@ -255,12 +263,21 @@ so publishing new builds into the same release never replaces a file that
 an earlier version of your module points at. Platforms that fail to build
 are listed at the end, and left as they were in `mygo-plugin.json`.
 
+Each file records the hash of the sources it was built from
+(`sourceHash`: the files of the build's directory, its `args` and
+`macOS`). Platforms whose files were built from the sources as they are
+are skipped (`-force` builds them again), and `mygo dev` and `mygo build`
+use those files rather than build the library, even in your own module,
+until the sources change. So people who work on your app or package but
+not on its library need neither Rust nor Zig.
+
 | Flag | |
 |---|---|
 | `-target` | the platforms, `GOOS-GOARCH` separated by commas, `all` (the default) or `host` |
 | `-release` | the URL of the directory the files are published in (default: the library's `release`) |
 | `-out` | the directory of the files to publish (default: `.mygo/native/release` of the module) |
 | `-upload` | uploads the files to the GitHub release of `-release` |
+| `-force` | builds the platforms whose published files were built from the sources as they are too |
 
 Building for other platforms needs their toolchains:
 
@@ -294,10 +311,12 @@ macOS 12 and later.
 | `libraries[].build.cargo` | the directory of the Rust crate, relative to the package, as `"./rust"` |
 | `libraries[].build.zig` | the directory of the Zig package, relative to the package, as `"./zig"` |
 | `libraries[].build.args` | more arguments of `cargo build` or `zig build` |
+| `libraries[].build.macOS` | the oldest macOS the library runs on, when later than the app's minimum or 12.0 |
 | `libraries[].release` | where the published files are |
-| `libraries[].files` | the published files by `GOOS-GOARCH`: `name`, `url` and `sha256`, written by `mygo native build` |
+| `libraries[].files` | the published files by `GOOS-GOARCH`: `name`, `url`, `sha256` and the `sourceHash` of the sources they were built from, written by `mygo native build` |
 | `libraries[].source` | where the sources of the published files come from, for people |
 
 A package may publish libraries without `build`, built by any means, by
-writing their `files` itself, as the [terminal plugin](plugins/terminal.md)
-does for Ghostty's.
+writing their `files` itself. The official plugins build theirs with Zig:
+[SQLite](plugins/sqlite.md) from its amalgamation, and the
+[terminal](plugins/terminal.md) from Ghostty's sources.

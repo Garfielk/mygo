@@ -152,12 +152,12 @@ Prebuilt libraries are published in
 CI, `go test` and unpackaged programs download the matching library and
 verify its SHA-256. Testing and building apps require no Zig installation.
 
-When updating SQLite or its C shim, run `go generate ./plugins/sqlite` with
-Zig 0.16.0 to build all six native libraries from the pinned,
-checksum-verified SQLite 3.53.4 source. It writes the manifest, ignored
-release assets and local CLI cache. From `plugins/sqlite`,
-`go run ./internal/libbuild -target host` builds just the host for local
-development before new release assets are published.
+The library is built like any [native library](../native-libraries.md):
+`native/` is a Zig package that pins SQLite 3.53.4's amalgamation by its
+hash. When updating SQLite or its C shim, run `go generate ./plugins/sqlite`
+with Zig 0.16.0 to build all six native libraries (`mygo native build`);
+until they are published, `mygo dev` and `mygo build` build the changed
+sources themselves.
 
 `mygo build` and `mygo dev` discover `mygo-plugin.json` and put the correct
 library among the app's resources, signed with the app on macOS. macOS

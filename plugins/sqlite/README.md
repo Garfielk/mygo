@@ -46,35 +46,29 @@ Prebuilt libraries are published in
 CI and unpackaged programs download the matching library and verify its
 SHA-256. Testing and building apps require no Zig installation.
 
-To update SQLite or its C shim, with Zig **0.16.0** on the path:
+The library is built by MyGo's pipeline for
+[native libraries](../../docs/native-libraries.md): `native/` is a Zig
+package whose `build.zig.zon` pins SQLite **3.53.4**'s amalgamation by its
+hash, and `build.zig` compiles it with the C shim. `mygo-plugin.json`
+names it, `"build": {"zig": "./native"}`, with its published builds, each
+with the hash of the sources it was built from: apps use them until
+`native/` changes, and then `mygo dev` and `mygo build` build the library
+themselves, with Zig **0.16.0** on the path.
+
+To publish new builds, after changing SQLite or its shim:
 
 ```sh
-go generate ./plugins/sqlite
-# Or build just this machine, from plugins/sqlite:
-go run ./internal/libbuild -target host
+go generate ./plugins/sqlite   # mygo native build: every platform, into mygo-plugin.json
+go run ./cmd/mygo native build -upload ./plugins/sqlite   # and upload them
+# Or build just this machine's, for go test:
+go run ./cmd/mygo native build -target host ./plugins/sqlite
 ```
 
-The generator downloads SQLite **3.53.4** from sqlite.org and checks its
-published SHA3-256 before extracting `sqlite3.c` and `sqlite3.h`. It builds
-macOS, Linux and Windows for amd64 and arm64, writes SHA-256 and release
-URLs to `mygo-plugin.json`, and populates the CLI's native-library cache.
-`mygo dev` and `mygo build` discover the manifest and bundle the matching
-library; macOS universal builds combine both architectures. Linux targets
-glibc 2.28 or later; macOS targets 12 or later. Binaries in `build/` are
-ignored by git.
-
-New binaries must be published before a fresh checkout or app build can
-download them. The default asset release is `sqlite-3.53.4-1`:
-
-```sh
-gh release create sqlite-3.53.4-1 plugins/sqlite/build/* --latest=false \
-  --title "SQLite 3.53.4 for MyGo" --notes "SQLite compiled with Zig 0.16.0 and the MyGo C shim."
-```
-
-Change the asset tag (or pass `-release <URL>`) when the shim, compiler or
-compile options change; regenerate and publish the manifest and binaries
-together. `-src <directory>` uses a local amalgamation instead of the
-verified download, intended for development.
+It builds macOS, Linux and Windows for amd64 and arm64 (Linux for glibc
+2.28 or later, macOS for 12 or later), names the files after their SHA-256,
+and writes their URLs under the release in `mygo-plugin.json`. Name a new
+release there for a new SQLite version; `-src`'s replacement is
+`"args": ["-Dsqlite=<directory>"]`, which builds another amalgamation.
 
 `MYGO_SQLITE_LIBRARY` overrides the library path. Otherwise the plugin
 looks in app resources, next to the executable, then the CLI's cache.

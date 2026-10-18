@@ -1,12 +1,15 @@
 const std = @import("std");
 
-// The Go generator downloads and verifies the pinned SQLite amalgamation.
+// SQLite's amalgamation, which build.zig.zon pins, and the plugin's C shim,
+// as a dynamic library: mygo native build builds it for every platform.
 // Nothing here, including Zig, is needed by the application at run time.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const sqlite = b.option([]const u8, "sqlite", "Directory containing sqlite3.c and sqlite3.h") orelse
-        @panic("pass -Dsqlite=<amalgamation directory>, or run go generate ./plugins/sqlite");
+    const source: std.Build.LazyPath = if (b.option([]const u8, "sqlite", "Directory of another sqlite3.c and sqlite3.h")) |dir|
+        .{ .cwd_relative = dir }
+    else
+        b.dependency("sqlite", .{}).path("");
     const module = b.createModule(.{
         .target = target,
         .optimize = optimize,
@@ -14,7 +17,6 @@ pub fn build(b: *std.Build) void {
         .strip = true,
         .pic = true,
     });
-    const source: std.Build.LazyPath = .{ .cwd_relative = sqlite };
     module.addIncludePath(source);
     module.addCSourceFiles(.{ .root = source, .files = &.{"sqlite3.c"}, .flags = &.{"-std=c11"} });
     module.addCSourceFile(.{ .file = b.path("sqlite.c"), .flags = &.{"-std=c11"} });

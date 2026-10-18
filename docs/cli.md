@@ -216,6 +216,7 @@ for the apps of others, which then need neither Rust nor Zig.
 | `-release` | the URL of the directory the files are published in, as `https://github.com/<owner>/<repo>/releases/download/<tag>` (default: the library's `release`) |
 | `-out` | the directory of the files to publish |
 | `-upload` | uploads the files to the GitHub release of `-release` with the GitHub CLI, creating it if needed |
+| `-force` | builds the platforms whose published files were built from the sources as they are too, which it otherwise skips |
 
 ## mygo keygen
 

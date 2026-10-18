@@ -73,7 +73,7 @@ go run ./examples/notes                    # the rich text editor (ui/richtext),
 go run ./examples/terminal                 # a terminal (downloads libghostty-vt once)
 go run ./cmd/mygo native build -target host examples/rust-native  # build a package's Rust/Zig library for go run and go test (cargo)
 go run ./cmd/mygo native build ./pkg       # its libraries for every platform, into mygo-plugin.json, ready to publish
-go generate ./plugins/terminal             # build libghostty-vt for every platform (with Zig), write Ghostty's themes
+go generate ./plugins/terminal             # build libghostty-vt for every platform (mygo native build, Zig 0.16), write Ghostty's themes
 go generate ./internal/gpu/d3d11           # recompile the Direct3D shader (on Windows)
 go generate ./internal/gpu/metal           # recompile the Metal shader (on macOS, with Xcode)
 go generate ./internal/l10n                # MyGo's own strings: their functions, and the packages of translations in locales/
@@ -102,9 +102,12 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
   package (`@mygo-plugins/<name>`) side by side, released with
   mygo-runtime's version. The updater plugin is Go only; its `native`
   package draws the update window in native UI. The terminal plugin is Go
-  only too, for native UI, with libghostty-vt loaded through purego: its
-  `mygo-plugin.json` pins the builds the CLI puts into apps, published as
-  release assets (`libghostty-vt-<commit>`); change it with `go generate`. The glass
+  only too, for native UI, with libghostty-vt loaded through purego. Its
+  `native/` (a Zig package pinning Ghostty's commit) and SQLite's are
+  native libraries like any: `mygo-plugin.json` names their published
+  builds (release assets `libghostty-vt-<commit>`, `sqlite-<version>-<n>`),
+  each with the hash of its sources, and `go generate` publishes new ones
+  (`mygo native build`, with Zig 0.16.0). The glass
   plugin is Go only too, an effect of the renderers (`scene.Effect`): its
   shader in Metal, HLSL and GLSL with a CPU twin that must draw the same
   pixels, compiled ahead of time by `go generate` on macOS and Windows.
