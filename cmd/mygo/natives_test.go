@@ -195,12 +195,18 @@ func TestNativesFromSources(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(built) }))
 	defer srv.Close()
+	// A cache of its own, where macOS's is under $HOME, as rustup's and
+	// cargo's homes are unless their variables name them.
+	if home, err := os.UserHomeDir(); err == nil {
+		for v, dir := range map[string]string{"RUSTUP_HOME": ".rustup", "CARGO_HOME": ".cargo"} {
+			if os.Getenv(v) == "" {
+				t.Setenv(v, filepath.Join(home, dir))
+			}
+		}
+	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("LocalAppData", t.TempDir())
-	if runtime.GOOS == "darwin" {
-		t.Setenv("HOME", t.TempDir())
-	}
 	build := &nativelib.Build{Cargo: "./rust"}
 	sources, err := nativelib.SourceHash(filepath.Join(dir, "lib", "rust"), build)
 	if err != nil {
