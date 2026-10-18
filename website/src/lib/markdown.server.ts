@@ -196,17 +196,36 @@ function rewriteLink(node: Element, href: string, file: string, links: LinkOptio
   if (/^https?:/.test(rewritten)) node.properties.rel = ["noreferrer"]
 }
 
-/** A highlighted code block with a copy button, from remark-rehype's `<pre><code>`. */
+/** The names code blocks show for the languages of their fences. */
+const languageNames: Record<string, string> = {
+  go: "Go",
+  ts: "TypeScript",
+  tsx: "TSX",
+  js: "JavaScript",
+  json: "JSON",
+  sh: "Shell",
+  css: "CSS",
+  html: "HTML",
+  xml: "XML",
+  yaml: "YAML",
+  zig: "Zig",
+  rust: "Rust",
+  toml: "TOML",
+}
+
+/** A highlighted code block with its language and a copy button, from remark-rehype's `<pre><code>`. */
 function codeBlock(pre: Element, shiki: Highlighter): Element {
   const code = pre.children.find((c): c is Element => c.type === "element" && c.tagName === "code")
   const classes = (code?.properties.className as string[] | undefined) ?? []
   const lang = classes.find((c) => c.startsWith("language-"))?.slice("language-".length) ?? "text"
+  const name = languageNames[lang]
   return {
     type: "element",
     tagName: "div",
     properties: { className: ["code-block"] },
     children: [
       highlight(shiki, toString(code ?? pre).replace(/\n$/, ""), lang),
+      ...(name ? [label(name)] : []),
       {
         type: "element",
         tagName: "button",
@@ -218,6 +237,10 @@ function codeBlock(pre: Element, shiki: Highlighter): Element {
       },
     ],
   }
+}
+
+function label(name: string): Element {
+  return { type: "element", tagName: "span", properties: { className: ["code-lang"] }, children: [{ type: "text", value: name }] }
 }
 
 function icon(className: string, paths: string[]): Element {
