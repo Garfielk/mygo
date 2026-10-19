@@ -10,9 +10,13 @@
 //	go run ./examples/frosted-folder
 //
 // It plays the video's loop, timed from its frames; the pointer over the
-// folder holds it open. The folder is one shader written in Go (package
-// ui/shader), which draws the scene in perspective and blurs it in one
-// pass, as every blur is of rectangles it knows.
+// folder holds it open. The scene is elements: the page a radial
+// gradient (RadialGradient), the back a path in a gradient of stops, its
+// rim blurred (Blur), and the pane a box turned on its hinge in
+// perspective (RotationX, Perspective), frosting what is behind it with
+// the glass plugin's blur (glass.Blur), under its milk; a strip of that
+// blur fading in down a mask (glass.Blur's Mask) blurs the pane's lower
+// part progressively, and moves down as the folder opens.
 package main
 
 import (

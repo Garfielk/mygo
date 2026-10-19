@@ -1,16 +1,16 @@
 package main
 
 import (
-	_ "embed"
 	"math"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/shader"
 )
 
-// The window shows the video's frame at half its size: a DIP is two of
-// its pixels, the shader's units.
+// The window shows the video's frame at half its size: the scene is laid
+// out in the video's pixels, units, two a DIP, from the frame's middle,
+// y down.
 const (
 	windowSize = 540
 	unit       = 2
@@ -35,35 +35,75 @@ var (
 	frosting = ui.Animation{Duration: 470 * time.Millisecond, Ease: ui.CubicBezier(0.3, 0, 0.7, 1)}
 )
 
-// The scene's geometry, in the shader's units (see folder.kage): the
-// camera's distance, the pane's half width, its height above the hinge,
-// where the hinge is, and how far the pane's top comes down as it opens.
+// The scene, in units.
 const (
-	camera     = 2074
+	// The camera is camera units from the hinge, its eye level with the
+	// pane's top, which comes down drop units as the folder opens.
+	camera = 2074
+	drop   = 57.6
+
+	// The back: its sides, the top of its tab and of its body, its bottom,
+	// and the radius of its corners, top and bottom. The tab's top slopes
+	// down to the body's, through (slopeX, slopeY).
+	backHalf    = 230
+	tabTop      = -189
+	bodyTop     = -148.5
+	backBottom  = 146
+	backRadius  = 44
+	bottomRound = 120
+	slopeX      = -25.5
+	slopeY      = -169
+	slope       = 0.6
+
+	// The sheet in it.
+	sheetHalf, sheetTop, sheetBottom, sheetRound = 177, -70, 88, 50
+
+	// The pane: half its width, its top, its height above the hinge and
+	// below it, which shows taller as the glass comes into focus, and its
+	// corners' radius.
 	paneHalf   = 246
+	paneTop    = -135
 	paneHeight = 275
-	hinge      = 140
-	drop       = 57.6
+	belowFrom  = 65
+	belowTo    = 100
+	paneRound  = 30
+
+	// The progressive blur over the pane's lower part: from focusFrom
+	// below its top, closed, or focusTo, open, more and more, to blurMost
+	// blurReach further down.
+	focusFrom = 45
+	focusTo   = 235
+	blurMost  = 50
+	blurReach = 300
+
+	// How much the glass blurs what is behind it, frosted and clear.
+	frostedBlur = 90
+	clearBlur   = 12
 )
 
+// The scene's colors.
 var (
-	//go:embed folder.kage
-	folderSource string
-	folderShader = shader.MustCompile(folderSource)
-
-	angleVar = folderShader.Uniform("Angle")
-	clearVar = folderShader.Uniform("Clear")
-	focusVar = folderShader.Uniform("Focus")
-	unitVar  = folderShader.Uniform("Unit")
+	// The page: a little bluer in the middle.
+	pageMiddle, pageEdge = ui.RGB(237, 239, 253), ui.RGB(247, 248, 254)
+	// The back: light at the top of the tab, deeper down, indigo at the
+	// bottom; its top's rim shaded at the edge and lit inside it.
+	backStops = []ui.GradientStop{
+		{Color: ui.RGB(170, 210, 253), At: down(-178)},
+		{Color: ui.RGB(85, 128, 251), At: down(-84)},
+		{Color: ui.RGB(64, 77, 245), At: down(40)},
+	}
+	rimShade, rimLight = ui.RGBA(40, 70, 190, 0.25), ui.RGBA(205, 238, 255, 0.55)
+	// The sheet in the back: a little grayer than the page.
+	sheetColor = ui.RGB(214, 219, 251)
+	// The glass's milk, frosted and clear, and its rim: a dark hairline at
+	// the edge, a bright one inside.
+	milkFrosted, milkClear = [3]float32{0.75, 0.84, 0.988}, [3]float32{0.742, 0.842, 0.992}
+	hairline, innerLine    = ui.RGBA(140, 158, 230, 0.45), ui.RGBA(217, 230, 255, 0.5)
 )
 
-// The page, and the folder's colors where the window draws without a GPU.
-var (
-	pageColor  = ui.Hex("#f7f8fe")
-	backTop    = ui.Hex("#aad2fd")
-	backBottom = ui.Hex("#5580fb")
-	paneColor  = ui.RGB(190, 210, 252)
-)
+// down returns where y lies down the back, from 0 at its top to 1 at its
+// bottom.
+func down(y float32) float32 { return (y - tabTop) / (backBottom - tabTop) }
 
 // folder is the window's state.
 type folder struct {
@@ -74,11 +114,11 @@ type folder struct {
 	// open is how far it is open, from 0 to 1, and clear how clear its
 	// glass is.
 	open, clear float32
-	values      *shader.Values
+	back        ui.Path
 }
 
 func newFolder() *folder {
-	return &folder{values: folderShader.NewValues()}
+	return &folder{}
 }
 
 func (f *folder) view(c *ui.Context) {
@@ -86,33 +126,161 @@ func (f *folder) view(c *ui.Context) {
 	if f.start.IsZero() {
 		f.start = now
 	}
-	root := ui.Column(c).Fill().Center().Background(pageColor)
-	root.Draw(f.draw)
-	root.Children(func() {
-		// The folder, which the pointer holds open; the drawing is the
-		// window's.
-		box := ui.Box(c).Size(250, 185).Margin(0, 0, 15, 0).Label("Folder")
-		held := box.Hovered()
-		if f.held && !held {
-			// Let go, it closes and stays closed a while, as in the loop.
-			f.start = now.Add(-closeAt)
-		}
-		f.held = held
-		// The loop stops while the desktop asks for less motion, which
-		// would only flash it open and shut.
-		open := false
-		if !held && !c.Preferences().ReduceMotion {
-			var wait time.Duration
-			open, wait = f.looping(now)
-			c.After(wait)
-		}
-		target, move, glass := float32(0), closing, frosting
-		if held || open {
-			target, move, glass = 1, opening, clearing
-		}
-		f.open = box.AnimateTo("open", target, move)
-		f.clear = box.AnimateTo("clear", target, glass)
+	// The stage is the video's frame, in the middle of the window, whose
+	// page goes on around it.
+	ui.Column(c).Fill().Center().Background(pageEdge).Children(func() {
+		stage := ui.Box(c).Size(windowSize, windowSize).RadialGradient(ui.RadialGradient{
+			Stops:  []ui.GradientStop{{Color: pageMiddle, At: 0.45}, {Color: pageEdge, At: 1}},
+			Radius: ui.Point{X: 280.0 / windowSize, Y: 280.0 / windowSize},
+		})
+		stage.Children(func() { f.scene(c, now) })
 	})
+}
+
+// scene builds the folder on the stage, at now.
+func (f *folder) scene(c *ui.Context, now time.Time) {
+	// The folder, which the pointer holds open.
+	box := place(ui.Box(c), -250, -200, 500, 370).Label("Folder")
+	held := box.Hovered()
+	if f.held && !held {
+		// Let go, it closes and stays closed a while, as in the loop.
+		f.start = now.Add(-closeAt)
+	}
+	f.held = held
+	// The loop stops while the desktop asks for less motion, which would
+	// only flash it open and shut.
+	open := false
+	if !held && !c.Preferences().ReduceMotion {
+		var wait time.Duration
+		open, wait = f.looping(now)
+		c.After(wait)
+	}
+	target, move, frost := float32(0), closing, frosting
+	if held || open {
+		target, move, frost = 1, opening, clearing
+	}
+	f.open = box.AnimateTo("open", target, move)
+	f.clear = box.AnimateTo("clear", target, frost)
+	focus := min((120*f.open+70*f.clear)/190, 1)
+
+	// The back, its rim soft as a bevel, and the sheet in it.
+	place(ui.Box(c), -backHalf, tabTop, 2*backHalf, backBottom-tabTop).PassThrough().Draw(f.drawBack)
+	place(ui.Box(c), -backHalf, tabTop, 2*backHalf, backBottom-tabTop).PassThrough().Draw(f.drawRim).Blur(0.6)
+	place(ui.Box(c), -sheetHalf, sheetTop, 2*sheetHalf, sheetBottom-sheetTop).PassThrough().
+		Radius(sheetRound / unit).Background(sheetColor)
+
+	// The pane, turned on its hinge toward the camera, frosting what is
+	// behind it under its milk, lighter at the top.
+	below := belowFrom + (belowTo-belowFrom)*focus
+	hinge := float32(paneHeight) / unit
+	a := float32(angle(f.open))
+	turn := ui.Translation(0, -hinge).Then(ui.RotationX(-a * 180 / math.Pi)).
+		Then(ui.Translation(0, hinge)).Then(ui.Perspective(camera / unit))
+	milk := func(light float32) ui.Color {
+		var rgb [3]uint8
+		for i := range rgb {
+			v := mix(milkFrosted[i], milkClear[i], f.clear) + light*[3]float32{0.035, 0.025, 0}[i]
+			rgb[i] = uint8(min(max(v, 0), 1)*255 + 0.5)
+		}
+		return ui.RGBA(rgb[0], rgb[1], rgb[2], mix(0.92, 0.77, f.clear))
+	}
+	pane := place(ui.Box(c), -paneHalf, paneTop, 2*paneHalf, paneHeight+below).PassThrough().
+		TransformOrigin(0.5, 0).Transform(turn).Radius(paneRound / unit).
+		Material(glass.Blur{Radius: mix(frostedBlur, clearBlur, f.clear) / unit})
+	pane.Children(func() {
+		ui.Box(c).Fill().PassThrough().Radius(paneRound/unit).
+			LinearGradient(ui.LinearGradient{From: milk(0.5), To: milk(0.5 - (paneHeight+below)/paneHeight), Angle: 180}).
+			Border(0.6, hairline).InsetShadow(0, 0, 1, 1.4, innerLine)
+	})
+
+	// The progressive blur over the pane's lower part and what is around
+	// it, from where it starts down the pane, which comes down as it
+	// opens.
+	top := paneTop + drop*f.open + float32(math.Cos(float64(a)))*mix(focusFrom, focusTo, focus)
+	place(ui.Box(c), -320, top, 640, 400).PassThrough().Material(glass.Blur{Radius: blurMost / unit, Mask: &ui.LinearGradient{
+		From: ui.Transparent, To: ui.RGB(0, 0, 0), Angle: 180, End: blurReach / 400,
+	}})
+}
+
+// place puts e on the stage at (x, y), w×h, in units.
+func place(e ui.Element, x, y, w, h float32) ui.Element {
+	return e.Absolute().Left(windowSize/2+x/unit).Top(windowSize/2+y/unit).Size(w/unit, h/unit)
+}
+
+func mix(a, b, t float32) float32 { return a + (b-a)*t }
+
+// drawBack paints the back in r: its outline, the tab's top sloping down
+// to the body's, in its blues.
+func (f *folder) drawBack(p *ui.Painter, r ui.Rect) {
+	line, curve, top := f.outline(r)
+	path := &f.back
+	path.Reset()
+	path.MoveTo(f.at(r, -backHalf, backBottom-bottomRound))
+	top(0, false)
+	line(backHalf, backBottom-bottomRound)
+	curve(backHalf, backBottom, backHalf-bottomRound, backBottom)
+	line(-backHalf+bottomRound, backBottom)
+	curve(-backHalf, backBottom, -backHalf, backBottom-bottomRound)
+	path.Close()
+	p.FillPathGradient(path, ui.LinearGradient{Angle: 180, Stops: backStops})
+}
+
+// drawRim paints the rim along the back's top, in r: a shade at its edge,
+// and light a few units inside it, as on a bevel lit from above.
+func (f *folder) drawRim(p *ui.Painter, r ui.Rect) {
+	_, _, top := f.outline(r)
+	path := &f.back
+	for _, rim := range []struct {
+		inset, width float32
+		c            ui.Color
+	}{{2.5, 2, rimShade}, {6.5, 3.2, rimLight}} {
+		path.Reset()
+		top(rim.inset, true)
+		p.StrokePath(path, rim.width/unit, rim.c)
+	}
+}
+
+// at maps units to the window, in the back's box r.
+func (f *folder) at(r ui.Rect, x, y float32) (float32, float32) {
+	return r.X + (x+backHalf)/unit, r.Y + (y-tabTop)/unit
+}
+
+// outline returns functions adding to f.back, in the back's box r, in
+// units: a line, a curve, and the top's line from the left side to the
+// right, d units inside it: round at the corners, the slope meeting the
+// tab's top at x0 and the body's at x1, rounded into them; a rim's goes
+// from halfway round the corners, starting a path of its own.
+func (f *folder) outline(r ui.Rect) (line func(x, y float32), curve func(cx, cy, x, y float32), top func(d float32, rim bool)) {
+	path := &f.back
+	line = func(x, y float32) { path.LineTo(f.at(r, x, y)) }
+	curve = func(cx, cy, x, y float32) {
+		ax, ay := f.at(r, cx, cy)
+		bx, by := f.at(r, x, y)
+		path.QuadTo(ax, ay, bx, by)
+	}
+	top = func(d float32, rim bool) {
+		x0, x1 := float32(slopeX+(tabTop-slopeY)/slope), float32(slopeX+(bodyTop-slopeY)/slope)
+		if rim {
+			// From halfway round the corner: the second half of its curve.
+			path.MoveTo(f.at(r, -backHalf+0.75*d+backRadius/4, tabTop+backRadius/4+0.75*d))
+			curve(-backHalf+(d+backRadius)/2, tabTop+d, -backHalf+backRadius, tabTop+d)
+		} else {
+			line(-backHalf+d, tabTop+backRadius)
+			curve(-backHalf+d, tabTop+d, -backHalf+backRadius, tabTop+d)
+		}
+		line(x0-12, tabTop+d)
+		curve(x0+d/2, tabTop+d, x0+12, tabTop+d+12*slope)
+		line(x1-12, bodyTop+d-12*slope)
+		curve(x1+d/2, bodyTop+d, x1+12, bodyTop+d)
+		line(backHalf-backRadius, bodyTop+d)
+		if rim {
+			// To halfway round the corner: the first half of its curve.
+			curve(backHalf-(d+backRadius)/2, bodyTop+d, backHalf-0.75*d-backRadius/4, bodyTop+backRadius/4+0.75*d)
+		} else {
+			curve(backHalf-d, bodyTop+d, backHalf-d, bodyTop+backRadius)
+		}
+	}
+	return line, curve, top
 }
 
 // looping tells whether the loop has the folder open at now, and how long
@@ -146,61 +314,4 @@ func angle(open float32) float64 {
 		}
 	}
 	return (lo + hi) / 2
-}
-
-// focus returns how far down the pane the progressive blur has moved:
-// with the pane, and further as the glass clears.
-func focus(open, clear float32) float32 {
-	return min((120*open+70*clear)/190, 1)
-}
-
-// draw paints the folder in the middle of r.
-func (f *folder) draw(p *ui.Painter, r ui.Rect) {
-	if !p.Accelerated() {
-		f.drawFlat(p, r)
-		return
-	}
-	f.drawGlass(p, r)
-}
-
-// drawGlass paints the folder with the shader.
-func (f *folder) drawGlass(p *ui.Painter, r ui.Rect) {
-	f.values.Float(angleVar, float32(angle(f.open))).
-		Float(clearVar, f.clear).
-		Float(focusVar, focus(f.open, f.clear)).
-		Float(unitVar, unit)
-	folderShader.Draw(p, r, shader.Options{Values: f.values})
-}
-
-// drawFlat paints the folder without the shader, which would run on the
-// CPU: its back, and its pane foreshortened as it tips, without blur.
-func (f *folder) drawFlat(p *ui.Painter, r ui.Rect) {
-	// pt maps the shader's units, from the middle of r, to the window.
-	x0, y0 := r.X+r.W/2, r.Y+r.H/2
-	pt := func(x, y float32) ui.Point { return ui.Point{X: x0 + x/unit, Y: y0 + y/unit} }
-	var back ui.Path
-	move := func(x, y float32) { q := pt(x, y); back.MoveTo(q.X, q.Y) }
-	line := func(x, y float32) { q := pt(x, y); back.LineTo(q.X, q.Y) }
-	// A corner of radius 44, from the edge it ends to the next.
-	corner := func(x1, y1, x2, y2, x, y float32) {
-		a, b, c := pt(x1, y1), pt(x2, y2), pt(x, y)
-		back.CubeTo(a.X, a.Y, b.X, b.Y, c.X, c.Y)
-	}
-	move(-230, 100)
-	line(-230, -145)
-	corner(-230, -169, -210, -189, -186, -189)
-	line(-58.8, -189)
-	line(8.6, -148.5)
-	line(186, -148.5)
-	corner(210, -148.5, 230, -128.5, 230, -104.5)
-	line(230, 100)
-	back.Close()
-	p.FillPathGradient(&back, ui.LinearGradient{From: backTop, To: backBottom, Angle: 180})
-
-	// The pane, as wide as it shows halfway up.
-	a := angle(f.open)
-	h := float32(paneHeight * math.Cos(a))
-	w := float32(paneHalf * camera / (camera - paneHeight*math.Sin(a)/2))
-	top := pt(-w, hinge-h)
-	p.Fill(ui.Rect{X: top.X, Y: top.Y, W: 2 * w / unit, H: h / unit}, paneColor, 15)
 }

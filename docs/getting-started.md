@@ -233,8 +233,9 @@ The apps run where they are, but to ship them to users, sign them: see
     while it thinks, borders of conic gradients blurred, and a glowing
     field, shimmering text and an orb, shaders), `examples/frosted-folder`
     (a folder of frosted glass opening, its pane tipping toward you in
-    perspective as the glass comes into focus: a progressive blur and a
-    frost, drawn by one shader in one pass), `examples/timeline`
+    perspective as the glass comes into focus: a pane turned in 3D,
+    frosted by the glass plugin's blur, a progressive blur down a mask,
+    and a radial gradient), `examples/timeline`
     (an intro on one playhead: a card sliding in, its title and rows
     following it, with play, pause, reverse and restart) and
     `examples/gallery` (a tour of the
