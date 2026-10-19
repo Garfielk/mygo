@@ -51,10 +51,12 @@ const (
 	sheetRound  = 50.0
 
 	// The pane: half its width, its height above the hinge and below it,
-	// its corners' radius.
+	// which shows taller as the glass comes into focus, its corners'
+	// radius.
 	paneHalf   = 246.0
 	paneHeight = 275.0
-	paneBelow  = 65.0
+	belowFrom  = 65.0
+	belowTo    = 100.0
 	paneRadius = 30.0
 	hinge      = 140.0
 
@@ -195,7 +197,7 @@ func Fragment(dst vec4, pos vec2) vec4 {
 		col = mix(col, b, cdf(-d/edge)*cdf(-v*ky/edge))
 	}
 
-	tall := paneHeight + paneBelow
+	tall := paneHeight + mix(belowFrom, belowTo, Focus)
 	across := cdf((paneHalf - abs(u)) * kx / edge)
 	down := cdf(v*ky/edge) * cdf((tall-v)*ky/edge)
 	k := 0.5 * (kx + ky)
