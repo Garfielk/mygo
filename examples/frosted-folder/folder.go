@@ -163,9 +163,8 @@ func (f *folder) scene(c *ui.Context, now time.Time) {
 	f.clear = box.AnimateTo("clear", target, frost)
 	focus := min((120*f.open+70*f.clear)/190, 1)
 
-	// The back, its rim soft as a bevel, and the sheet in it.
+	// The back, and the sheet in it.
 	place(ui.Box(c), -backHalf, tabTop, 2*backHalf, backBottom-tabTop).PassThrough().Draw(f.drawBack)
-	place(ui.Box(c), -backHalf, tabTop, 2*backHalf, backBottom-tabTop).PassThrough().Draw(f.drawRim).Blur(0.6)
 	place(ui.Box(c), -sheetHalf, sheetTop, 2*sheetHalf, sheetBottom-sheetTop).PassThrough().
 		Radius(sheetRound / unit).Background(sheetColor)
 
@@ -196,9 +195,13 @@ func (f *folder) scene(c *ui.Context, now time.Time) {
 	// The progressive blur over the pane's lower part and what is around
 	// it, from where it starts down the pane, which comes down as it
 	// opens.
-	top := paneTop + drop*f.open + float32(math.Cos(float64(a)))*mix(focusFrom, focusTo, focus)
-	place(ui.Box(c), -320, top, 640, 400).PassThrough().Material(glass.Blur{Radius: blurMost / unit, Mask: &ui.LinearGradient{
-		From: ui.Transparent, To: ui.RGB(0, 0, 0), Angle: 180, End: blurReach / 400,
+	// It reaches as far below the pane as its blur spreads, and no
+	// further: it blurs what is under it every frame the pane moves.
+	cos := float32(math.Cos(float64(a)))
+	top := paneTop + drop*f.open + cos*mix(focusFrom, focusTo, focus)
+	h := max(paneTop+(paneHeight+below)*cos+drop*f.open+2.5*blurMost-top, 1)
+	place(ui.Box(c), -320, top, 640, h).PassThrough().Material(glass.Blur{Radius: blurMost / unit, Mask: &ui.LinearGradient{
+		From: ui.Transparent, To: ui.RGBA(0, 0, 0, min(h/blurReach, 1)), Angle: 180, End: min(blurReach/h, 1),
 	}})
 }
 
@@ -223,20 +226,19 @@ func (f *folder) drawBack(p *ui.Painter, r ui.Rect) {
 	curve(-backHalf, backBottom, -backHalf, backBottom-bottomRound)
 	path.Close()
 	p.FillPathGradient(path, ui.LinearGradient{Angle: 180, Stops: backStops})
-}
 
-// drawRim paints the rim along the back's top, in r: a shade at its edge,
-// and light a few units inside it, as on a bevel lit from above.
-func (f *folder) drawRim(p *ui.Painter, r ui.Rect) {
-	_, _, top := f.outline(r)
-	path := &f.back
+	// The rim along the top: a shade at its edge, and light a few units
+	// inside it, as on a bevel lit from above, each soft as strokes of a
+	// few widths over each other.
 	for _, rim := range []struct {
 		inset, width float32
 		c            ui.Color
 	}{{2.5, 2, rimShade}, {6.5, 3.2, rimLight}} {
 		path.Reset()
 		top(rim.inset, true)
-		p.StrokePath(path, rim.width/unit, rim.c)
+		for _, s := range [...]struct{ wider, alpha float32 }{{2.4, 0.3}, {1.2, 0.35}, {0, 0.45}} {
+			p.StrokePath(path, (rim.width+s.wider)/unit, rim.c.Alpha(s.alpha))
+		}
 	}
 }
 
