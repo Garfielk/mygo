@@ -541,7 +541,7 @@ func (r *Renderer) buffers(w, h, bw, bh, n int) error {
 	r.held = false
 	if r.swapChain == 0 {
 		desc := swapChainDesc1{Width: uint32(bw), Height: uint32(bh), Format: formatB8G8R8A8Unorm, SampleCount: 1,
-			BufferUsage: 0x20, BufferCount: uint32(n), Scaling: 0, SwapEffect: 3 /* flip sequential */, Flags: swapChainWaitable}
+			BufferUsage: 0x20, BufferCount: uint32(n), Scaling: 0, SwapEffect: 3 /* flip sequential */, Flags: zzWaitable()}
 		if r.composed {
 			if err := r.composeSwapChain(desc); err != nil {
 				return err
@@ -554,13 +554,13 @@ func (r *Renderer) buffers(w, h, bw, bh, n int) error {
 			call(r.factory, factoryMakeWindowAssoc, r.hwnd, noAltEnter)
 		}
 		call(r.swapChain, 0, uintptr(unsafe.Pointer(&iidIDXGISwapChain2)), uintptr(unsafe.Pointer(&r.swapChain2)))
-		if r.swapChain2 != 0 {
+		if r.swapChain2 != 0 && zzWaitable() != 0 {
 			// One frame waits ahead of the screen, which the frame
 			// latency object tells room for.
 			call(r.swapChain2, scSetMaxLatency, 1)
 			r.lat.handle = call(r.swapChain2, scLatencyWaitable)
 		}
-	} else if hr := call(r.swapChain, scResizeBuffers, uintptr(n), uintptr(bw), uintptr(bh), 0, swapChainWaitable); failed(hr) {
+	} else if hr := call(r.swapChain, scResizeBuffers, uintptr(n), uintptr(bw), uintptr(bh), 0, uintptr(zzWaitable())); failed(hr) {
 		return fmt.Errorf("d3d11: cannot resize the swap chain: %#x", uint32(hr))
 	}
 	if err := r.setSourceSize(w, h); err != nil {
@@ -1432,4 +1432,14 @@ func (r *Renderer) sweep() {
 			delete(r.canvases, id)
 		}
 	}
+}
+
+// zzWaitable is the swap chain's flag for the frame latency object, none
+// with ZZ_WAITABLE=0 (SCRATCH, for internal/zzwaitable: removed before
+// merging).
+func zzWaitable() uint32 {
+	if os.Getenv("ZZ_WAITABLE") == "0" {
+		return 0
+	}
+	return swapChainWaitable
 }
