@@ -59,6 +59,37 @@ func TestConic(t *testing.T) {
 	}
 }
 
+// A radial gradient goes from its center at 0 out to its ellipse at 1,
+// its stops at their fractions of the way, and mixes in Oklab as asked.
+func TestRadial(t *testing.T) {
+	s := &scene.Scene{Width: 100, Height: 60}
+	s.Stops = []scene.Stop{{Color: red, At: 0}, {Color: green, At: 0.5}, {Color: blue, At: 1}}
+	s.Ops = []scene.Op{{Kind: scene.OpFill, Rect: scene.Rect{W: 100, H: 60}, Paint: scene.PaintRadial,
+		Gradient: [4]float32{50.5, 30.5, 40, 20}, Stops: [2]int32{0, 3}}}
+	img := NewImage(100, 60)
+	Render(img, s)
+	for _, c := range []struct {
+		x, y int
+		want [4]byte
+	}{
+		{50, 30, [4]byte{255, 0, 0, 255}},   // the center
+		{70, 30, [4]byte{0, 255, 0, 255}},   // halfway across
+		{50, 40, [4]byte{0, 255, 0, 255}},   // halfway down, the ellipse half as tall
+		{90, 30, [4]byte{0, 0, 255, 255}},   // on the ellipse
+		{98, 58, [4]byte{0, 0, 255, 255}},   // beyond it
+		{60, 30, [4]byte{128, 128, 0, 255}}, // a quarter: halfway from red to green
+	} {
+		if got := at(img, c.x, c.y); !nearRGBA(got, c.want, 7) {
+			t.Errorf("(%d, %d) = %v, want %v", c.x, c.y, got, c.want)
+		}
+	}
+	s.Ops[0].Paint = scene.PaintRadialOklab
+	Render(img, s)
+	if got := at(img, 60, 30); got[0] <= 140 {
+		t.Errorf("a quarter of the way in Oklab = %v, want lighter than the sRGB mix", got)
+	}
+}
+
 // A linear gradient with stops shows its first color before its first
 // stop and its last after its last, and mixes in sRGB, or in Oklab, whose
 // middle between red and blue is lighter.

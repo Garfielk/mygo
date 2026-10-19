@@ -277,11 +277,12 @@ type pathJob struct {
 // filled (non-zero winding), or with width > 0 stroked that many pixels
 // wide with round joins and caps.
 func (p *Painter) drawPath(f *flatPath, width float32, c Color, g *LinearGradient) {
-	p.drawPathPaint(f, width, c, g, nil)
+	p.drawPathPaint(f, width, c, g, nil, nil)
 }
 
-// drawPathPaint is drawPath in a linear gradient (g) or a conic one (cg).
-func (p *Painter) drawPathPaint(f *flatPath, width float32, c Color, g *LinearGradient, cg *ConicGradient) {
+// drawPathPaint is drawPath in a linear gradient (g), a conic one (cg) or
+// a radial one (rg).
+func (p *Painter) drawPathPaint(f *flatPath, width float32, c Color, g *LinearGradient, cg *ConicGradient, rg *RadialGradient) {
 	if f.polys() == 0 {
 		return
 	}
@@ -340,15 +341,18 @@ func (p *Painter) drawPathPaint(f *flatPath, width float32, c Color, g *LinearGr
 	c = c.Alpha(p.opacity)
 	p.s.Glyphs = append(p.s.Glyphs, scene.Glyph{X: x0, Y: y0, W: float32(gi.W), H: float32(gi.H), U: gi.X, V: gi.Y, UW: gi.W, VH: gi.H, Color: c.scene(), Wide: p.glyphWide(c)})
 	op := scene.Op{Kind: scene.OpGlyphs, Start: start, End: start + 1}
-	if g != nil || cg != nil {
+	if g != nil || cg != nil || rg != nil {
 		// The gradient spans the path's bounds.
 		op.Rect = scene.Rect{X: minX - hw, Y: minY - hw, W: maxX - minX + 2*hw, H: maxY - minY + 2*hw}
 		op.Opacity = p.opacity
-		if g != nil {
+		switch {
+		case g != nil:
 			p.gradient(&op, *g)
 			op.Wide = p.wide(g.From, g.To, Color{})
-		} else {
+		case cg != nil:
 			p.conic(&op, *cg)
+		default:
+			p.radial(&op, *rg)
 		}
 	}
 	p.add(op)
@@ -412,7 +416,7 @@ func (f *flatPath) capFade(width float32) float32 {
 func (p *Painter) FillPathConicGradient(path *Path, g ConicGradient) {
 	f := &p.rt.paths.flat
 	path.flatten(f, p.scale)
-	p.drawPathPaint(f, 0, Color{R: 255, G: 255, B: 255, A: 255}, nil, &g)
+	p.drawPathPaint(f, 0, Color{R: 255, G: 255, B: 255, A: 255}, nil, &g, nil)
 }
 
 // StrokePathConicGradient draws the outline of a path as StrokePath does,
@@ -423,7 +427,26 @@ func (p *Painter) StrokePathConicGradient(path *Path, width float32, g ConicGrad
 	// Trimmed short, it fades as its caps would (capFade).
 	saved := p.opacity
 	p.opacity *= f.capFade(width * p.scale)
-	p.drawPathPaint(f, width*p.scale, Color{R: 255, G: 255, B: 255, A: 255}, nil, &g)
+	p.drawPathPaint(f, width*p.scale, Color{R: 255, G: 255, B: 255, A: 255}, nil, &g, nil)
+	p.opacity = saved
+}
+
+// FillPathRadialGradient fills a path with a radial gradient across its
+// bounds.
+func (p *Painter) FillPathRadialGradient(path *Path, g RadialGradient) {
+	f := &p.rt.paths.flat
+	path.flatten(f, p.scale)
+	p.drawPathPaint(f, 0, Color{R: 255, G: 255, B: 255, A: 255}, nil, nil, &g)
+}
+
+// StrokePathRadialGradient draws the outline of a path as StrokePath
+// does, in a radial gradient across its bounds.
+func (p *Painter) StrokePathRadialGradient(path *Path, width float32, g RadialGradient) {
+	f := &p.rt.paths.flat
+	path.flatten(f, p.scale)
+	saved := p.opacity
+	p.opacity *= f.capFade(width * p.scale)
+	p.drawPathPaint(f, width*p.scale, Color{R: 255, G: 255, B: 255, A: 255}, nil, nil, &g)
 	p.opacity = saved
 }
 

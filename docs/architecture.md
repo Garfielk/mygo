@@ -2959,7 +2959,7 @@ either.
 - **Scenes** are flat lists of operations in device pixels: rounded
   rectangles with borders of a width per side, solid or dashed, filled
   with a color, a linear gradient mixed in sRGB or Oklab, a gradient of
-  stops, linear or conic (`Scene.Stops`, which ops point into, at most 32
+  stops, linear, conic or radial (`Scene.Stops`, which ops point into, at most 32
   each), or stripes, the border painted with the op's gradient where it
   says so (`BorderPaint`);
   shadows (blurred rounded rectangles, cut by the box casting them, as

@@ -37,8 +37,12 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
   `GradientStop{Color, At}` at its place from 0 to 1. `ConicGradient` turns
   its stops around a point instead, as CSS's `conic-gradient()` (SwiftUI's
   `AngularGradient`): from `Angle`, in degrees clockwise from upwards,
-  around `Center`, the middle unless set. `BorderLinearGradient` and
-  `BorderConicGradient` paint the border with one in place of its color,
+  around `Center`, the middle unless set. `RadialGradient` takes them out
+  from `Center` to an ellipse, as CSS's `radial-gradient()` (SwiftUI's
+  `EllipticalGradient`): `Radius` is its half width and half height in
+  fractions of the box's, and reaches the farthest corner unless set, as
+  CSS's default. `BorderLinearGradient`, `BorderConicGradient` and
+  `BorderRadialGradient` paint the border with one in place of its color,
   as SwiftUI's `strokeBorder` with a gradient:
 
   ```go
@@ -47,10 +51,20 @@ ui.Column(c).Padding(18).Gap(12).Radius(10).
   	BorderConicGradient(ui.ConicGradient{Stops: rainbow, Oklab: true})
   ```
 
+  A light falling on the middle of a page:
+
+  ```go
+  ui.Box(c).Fill().RadialGradient(ui.RadialGradient{
+  	Stops: []ui.GradientStop{{ui.Hex("#eaedfc"), 0}, {ui.Hex("#f7f8fe"), 1}},
+  	Radius: ui.Point{X: 0.6, Y: 0.6},
+  })
+  ```
+
   `Stripes(c, width, gap, angle)` draws stripes over the background, as on
   what is unavailable. A painter fills rectangles and paths with the same
-  gradients (`FillGradient`, `FillConicGradient`, `FillPathGradient`,
-  `FillPathConicGradient`, `StrokePathConicGradient`).
+  gradients (`FillGradient`, `FillConicGradient`, `FillRadialGradient`,
+  `FillPathGradient`, `FillPathConicGradient`, `FillPathRadialGradient`,
+  `StrokePathConicGradient`, `StrokePathRadialGradient`).
 - **Blur.** `Blur(sigma)` blurs the element and its children, as CSS's
   `filter: blur()`: what they draw spreads about 3 sigma DIPs around,
   transparent beyond, on the GPU. They render into a bitmap first, as an

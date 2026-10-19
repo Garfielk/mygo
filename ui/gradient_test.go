@@ -157,3 +157,72 @@ func TestPathConicGradient(t *testing.T) {
 		t.Errorf("above the middle %v, want red", got)
 	}
 }
+
+// A radial gradient goes out from its center, the box's middle unless
+// set, to an ellipse: through the farthest corner unless sized, in
+// fractions of the box, as CSS's radial-gradient().
+func TestRadialGradient(t *testing.T) {
+	stops := []GradientStop{{gRed, 0}, {gGreen, 0.5}, {gBlue, 1}}
+	half := Point{0.5, 0.5}
+	for _, c := range []struct {
+		g    RadialGradient
+		x, y int
+		want [4]uint8
+	}{
+		{RadialGradient{Stops: stops}, 50, 30, [4]uint8{255, 0, 0, 255}},               // the middle
+		{RadialGradient{Stops: stops, Radius: half}, 75, 30, [4]uint8{0, 255, 0, 255}}, // halfway to the right side
+		{RadialGradient{Stops: stops, Radius: half}, 50, 45, [4]uint8{0, 255, 0, 255}}, // and to the bottom
+		{RadialGradient{Stops: stops, Radius: half}, 98, 58, [4]uint8{0, 0, 255, 255}}, // beyond the ellipse
+		{RadialGradient{Stops: stops}, 99, 59, [4]uint8{0, 13, 242, 255}},              // nearly at the farthest corner
+		{RadialGradient{Stops: stops, Center: Point{1, 1}}, 99, 59, [4]uint8{255, 0, 0, 255}},
+		{RadialGradient{Stops: stops, Center: Point{1, 1}}, 1, 1, [4]uint8{0, 0, 255, 255}},
+	} {
+		g := c.g
+		tt := NewTester(func(ctx *Context) {
+			Box(ctx).Size(100, 60).RadialGradient(g)
+		}, 100, 60)
+		if got := rgba(tt.Image(), c.x, c.y); !nearRGBA8(got, c.want, 10) {
+			t.Errorf("%+v at (%d, %d) = %v, want %v", g, c.x, c.y, got, c.want)
+		}
+	}
+	// Background puts a color back in its place.
+	tt := NewTester(func(ctx *Context) {
+		Box(ctx).Size(100, 60).RadialGradient(RadialGradient{Stops: stops}).Background(gGreen)
+	}, 100, 60)
+	if got := rgba(tt.Image(), 50, 30); got != [4]uint8{0, 255, 0, 255} {
+		t.Errorf("a background after the gradient %v, want green", got)
+	}
+}
+
+// A border, and a path, take their colors from a radial gradient across
+// them.
+func TestBorderAndPathRadialGradient(t *testing.T) {
+	g := RadialGradient{Stops: []GradientStop{{gRed, 0.7}, {gBlue, 1}}}
+	tt := NewTester(func(c *Context) {
+		Box(c).Size(100, 100).Background(RGB(255, 255, 255)).Border(8, Color{}).BorderRadialGradient(g)
+	}, 100, 100)
+	img := tt.Image()
+	if got := rgba(img, 50, 3); !nearRGBA8(got, [4]uint8{255, 0, 0, 255}, 10) {
+		t.Errorf("the border above the middle %v, want red", got)
+	}
+	if got := rgba(img, 3, 3); got[2] < 3*got[0] {
+		t.Errorf("the border's corner %v, want mostly blue", got)
+	}
+	if got := rgba(img, 50, 50); got != [4]uint8{255, 255, 255, 255} {
+		t.Errorf("the inside %v, want the background", got)
+	}
+	tt = NewTester(func(c *Context) {
+		Box(c).Size(100, 100).Draw(func(p *Painter, r Rect) {
+			var disc Path
+			disc.Circle(50, 50, 40)
+			p.FillPathRadialGradient(&disc, RadialGradient{Stops: []GradientStop{{gRed, 0}, {gBlue, 1}}, Radius: Point{0.5, 0.5}})
+		})
+	}, 100, 100)
+	img = tt.Image()
+	if got := rgba(img, 50, 50); !nearRGBA8(got, [4]uint8{255, 0, 0, 255}, 12) {
+		t.Errorf("the disc's middle %v, want red", got)
+	}
+	if got := rgba(img, 50, 87); got[2] < 200 || got[0] > 60 {
+		t.Errorf("the disc's edge %v, want blue", got)
+	}
+}

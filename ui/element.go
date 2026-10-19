@@ -558,8 +558,8 @@ type LinearGradient struct {
 	Stops []GradientStop
 }
 
-// GradientStop is a color of a gradient (LinearGradient, ConicGradient)
-// and its place along it, from 0 to 1, as CSS's color stops are. The
+// GradientStop is a color of a gradient (LinearGradient, ConicGradient,
+// RadialGradient) and its place along it, from 0 to 1, as CSS's color stops are. The
 // gradient shows its first color before its first stop, its last after
 // its last, and between two stops their colors blended; two stops at one
 // place make a sharp edge. A gradient takes 32 stops at most, in sRGB.
@@ -588,11 +588,37 @@ type ConicGradient struct {
 	Oklab bool
 }
 
-// gradients is a conic fill and a border's gradient, linear or conic.
+// RadialGradient blends colors out from a point, as CSS's
+// radial-gradient() does (SwiftUI's EllipticalGradient, Flutter's
+// RadialGradient): its stops at their places from the point, 0, out to an
+// ellipse around it, 1.
+//
+//	e.RadialGradient(ui.RadialGradient{Stops: []ui.GradientStop{{white, 0}, {blue, 1}}})
+type RadialGradient struct {
+	Stops []GradientStop
+	// Center is the point the colors start from, in fractions of the box's
+	// width and height from its top left corner; the zero Point is its
+	// middle.
+	Center Point
+	// Radius is the ellipse's half width and half height, in fractions of
+	// the box's width and height: {0.5, 0.5} from the middle reaches the
+	// middle of each side. The zero Point reaches the farthest corner, as
+	// CSS's default: an ellipse through it, as wide for its height as the
+	// one through the farthest sides.
+	Radius Point
+	// Oklab mixes the colors in the Oklab color space, as LinearGradient's
+	// does.
+	Oklab bool
+}
+
+// gradients is a conic or radial fill and a border's gradient, linear,
+// conic or radial.
 type gradients struct {
 	conic        ConicGradient
+	radial       RadialGradient
 	borderLinear LinearGradient
 	borderConic  ConicGradient
+	borderRadial RadialGradient
 	border       borderPaint
 }
 
@@ -603,6 +629,7 @@ const (
 	borderColor borderPaint = iota
 	borderLinear
 	borderConic
+	borderRadial
 )
 
 // grad returns the element's gradients, made the first time.
@@ -621,6 +648,7 @@ const (
 	fillStripes
 	fillMaterial
 	fillConic
+	fillRadial
 )
 
 type stripes struct {
@@ -979,7 +1007,7 @@ func (e *node) Debug() *node { e.flags |= flagDebug; return e }
 // Background fills the element, in place of a gradient.
 func (e *node) Background(c Color) *node {
 	e.bg = c
-	if e.fill == fillGradient || e.fill == fillConic {
+	if e.fill == fillGradient || e.fill == fillConic || e.fill == fillRadial {
 		e.fill = fillColor
 	}
 	return e
@@ -1010,6 +1038,17 @@ func (e *node) ConicGradient(g ConicGradient) *node {
 	return e
 }
 
+// RadialGradient fills the element with a radial gradient, its colors
+// going out from a point (CSS's radial-gradient()):
+//
+//	ui.Box(c).Size(120, 80).Radius(12).RadialGradient(ui.RadialGradient{
+//		Stops: []ui.GradientStop{{white, 0}, {sky, 0.6}, {blue, 1}},
+//	})
+func (e *node) RadialGradient(g RadialGradient) *node {
+	e.gradients().radial, e.fill = g, fillRadial
+	return e
+}
+
 // BorderLinearGradient paints the element's border (Border, BorderWidth)
 // with a linear gradient across the element, in place of its color.
 func (e *node) BorderLinearGradient(g LinearGradient) *node {
@@ -1026,6 +1065,14 @@ func (e *node) BorderLinearGradient(g LinearGradient) *node {
 func (e *node) BorderConicGradient(g ConicGradient) *node {
 	gr := e.gradients()
 	gr.borderConic, gr.border = g, borderConic
+	return e
+}
+
+// BorderRadialGradient paints the element's border (Border, BorderWidth)
+// with a radial gradient across the element, in place of its color.
+func (e *node) BorderRadialGradient(g RadialGradient) *node {
+	gr := e.gradients()
+	gr.borderRadial, gr.border = g, borderRadial
 	return e
 }
 

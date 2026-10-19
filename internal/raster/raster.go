@@ -733,6 +733,8 @@ func (p *painter) at(px, py float32) [4]float32 {
 	case scene.PaintConic, scene.PaintConicOklab:
 		t := conicT(px-p.g[0], py-p.g[1], p.g[2])
 		return p.stopsAt(t)
+	case scene.PaintRadial, scene.PaintRadialOklab:
+		return p.stopsAt(radialT(px-p.g[0], py-p.g[1], p.g[2], p.g[3]))
 	}
 	g := p.g
 	dx, dy := g[2]-g[0], g[3]-g[1]
@@ -763,6 +765,14 @@ func conicT(dx, dy, angle float32) float32 {
 	return t - float32(math.Floor(float64(t)))
 }
 
+// radialT returns where (dx, dy) from a radial gradient's center lies
+// out to the ellipse of half axes rx and ry, 1 on it, as the shaders
+// compute it.
+func radialT(dx, dy, rx, ry float32) float32 {
+	x, y := dx/max(rx, 1e-4), dy/max(ry, 1e-4)
+	return float32(math.Sqrt(float64(x*x + y*y)))
+}
+
 // stopsAt returns the gradient's color at t: the first stop's before it,
 // the last's after it, and between two stops their colors mixed, in sRGB
 // or in Oklab, premultiplied, as the shaders' stopsAt.
@@ -785,7 +795,7 @@ func (p *painter) stopsAt(t float32) [4]float32 {
 	a, b := &s[i-1], &s[i]
 	k := clamp01((t - a.at) / max(b.at-a.at, 1e-6))
 	alpha := a.c[3]*(1-k) + b.c[3]*k
-	if p.paint == scene.PaintLinearStops || p.paint == scene.PaintConic {
+	if p.paint == scene.PaintLinearStops || p.paint == scene.PaintConic || p.paint == scene.PaintRadial {
 		return [4]float32{a.c[0]*(1-k) + b.c[0]*k, a.c[1]*(1-k) + b.c[1]*k, a.c[2]*(1-k) + b.c[2]*k, alpha}
 	}
 	if alpha <= 0 {

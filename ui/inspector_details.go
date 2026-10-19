@@ -244,6 +244,13 @@ func ownStyles(rt *engine, e *node) []inspDecl {
 		case e.fill == fillConic:
 			g := e.grads.conic
 			add("background", fmt.Sprintf("conic-gradient(from %sdeg, %d stops)", num(g.Angle), len(g.Stops)))
+		case e.fill == fillRadial:
+			g := e.grads.radial
+			c := g.Center
+			if c == (Point{}) {
+				c = Point{0.5, 0.5}
+			}
+			add("background", fmt.Sprintf("radial-gradient(at %s%% %s%%, %d stops)", num(c.X*100), num(c.Y*100), len(g.Stops)))
 		case e.fill == fillStripes:
 			add("background", "stripes "+colorText(e.stripes.c))
 		case e.fill == fillMaterial:

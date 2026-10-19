@@ -2931,6 +2931,18 @@ func (_handle Element) BorderLinearGradient(g LinearGradient) Element {
 	return wrapElement(_node.BorderLinearGradient(g))
 }
 
+// BorderRadialGradient paints the element's border (Border, BorderWidth)
+// with a radial gradient across the element, in place of its color.
+func (_handle Element) BorderRadialGradient(g RadialGradient) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.BorderRadialGradient(g))
+}
+
 // BorderStartWidth and BorderEndWidth set the width of the border on the
 // side lines start and on the other, as PaddingStart does: a line
 // between a sidebar and the content is BorderEndWidth(1) on the sidebar.
@@ -4844,6 +4856,22 @@ func (_handle Element) PressedOutside() bool {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.PressedOutside()
+}
+
+// RadialGradient fills the element with a radial gradient, its colors
+// going out from a point (CSS's radial-gradient()):
+//
+//	ui.Box(c).Size(120, 80).Radius(12).RadialGradient(ui.RadialGradient{
+//		Stops: []ui.GradientStop{{white, 0}, {sky, 0.6}, {blue, 1}},
+//	})
+func (_handle Element) RadialGradient(g RadialGradient) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.RadialGradient(g))
 }
 
 // Radius rounds the corners: one radius for all, or top-left, top-right,

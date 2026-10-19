@@ -15,6 +15,7 @@ func TestFoldTranslations(t *testing.T) {
 		{Kind: OpPushClip, Rect: Rect{W: 50, H: 50}, Transform: m},
 		{Kind: OpFill, Rect: Rect{W: 3, H: 4}, Transform: m.Mul(Rotation(10))},
 		{Kind: OpPopClip},
+		{Kind: OpFill, Rect: Rect{W: 6, H: 4}, Paint: PaintRadial, Gradient: [4]float32{3, 2, 3, 2}, Transform: m},
 	}}
 	var f TranslationFolder
 	if f.Fold(s) != s {
@@ -31,6 +32,8 @@ func TestFoldTranslations(t *testing.T) {
 		{Kind: OpImage, Rect: Rect{X: 10, Y: 20, W: 2, H: 2}},
 		s.Ops[6], // an image between pixels
 		s.Ops[7], s.Ops[8], s.Ops[9],
+		// A radial gradient's center moves; its radii stay.
+		{Kind: OpFill, Rect: Rect{X: 10, Y: 20, W: 6, H: 4}, Paint: PaintRadial, Gradient: [4]float32{13, 22, 3, 2}},
 	}
 	for i := range want {
 		if got.Ops[i] != want[i] {
