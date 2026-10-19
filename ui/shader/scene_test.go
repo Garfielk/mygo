@@ -312,14 +312,18 @@ func backdropSceneIn(s *Shader, blur float32, m scene.Affine, r scene.Rect, w, h
 	f(scaleWord-1, r.H)
 	f(scaleWord, 1)
 	a, b, c, d, x, y := float32(1), float32(0), float32(0), float32(1), float32(0), float32(0)
+	var g, k float32
 	if m.Set {
-		a, b, c, d, x, y = m.A, m.B, m.C, m.D, m.X, m.Y
+		a, b, c, d, x, y, g, k = m.A, m.B, m.C, m.D, m.X, m.Y, m.G, m.H
 	}
-	for k, v := range [3]float32{a, c, a*r.X + c*r.Y + x} {
-		f(row0Word+k, v)
+	for i, v := range [3]float32{a, c, a*r.X + c*r.Y + x} {
+		f(row0Word+i, v)
 	}
-	for k, v := range [3]float32{b, d, b*r.X + d*r.Y + y} {
-		f(row1Word+k, v)
+	for i, v := range [3]float32{b, d, b*r.X + d*r.Y + y} {
+		f(row1Word+i, v)
+	}
+	for i, v := range [3]float32{g, k, g*r.X + k*r.Y + 1} {
+		f(row2Word+i, v)
 	}
 	f(areaWord, float32(bk.Area.Min.X))
 	f(areaWord+1, float32(bk.Area.Min.Y))
@@ -329,12 +333,15 @@ func backdropSceneIn(s *Shader, blur float32, m scene.Affine, r scene.Rect, w, h
 	return sc
 }
 
-// backdropCases are the backdrops the GPU tests draw: sharp, blurred, and
-// under a rotation.
+// backdropCases are the backdrops the GPU tests draw: sharp, blurred,
+// under a rotation, and turned in perspective.
 func backdropCases() map[string]*scene.Scene {
 	s := MustCompile(backdropSource)
 	rotate := scene.Translation(115, 60).Mul(scene.Rotation(12)).Mul(scene.Translation(-115, -60))
-	return map[string]*scene.Scene{"sharp": backdropScene(s, 0, scene.Affine{}), "blurred": backdropScene(s, 6, scene.Affine{}), "rotated": backdropScene(s, 3, rotate)}
+	// Turned 40° about its middle row, seen from 300 pixels.
+	turn := scene.Translation(115, 60).Mul(scene.Projective(1, 0, 0, 0.766, 0, 0, 0, -0.643/300)).Mul(scene.Translation(-115, -60))
+	return map[string]*scene.Scene{"sharp": backdropScene(s, 0, scene.Affine{}), "blurred": backdropScene(s, 6, scene.Affine{}),
+		"rotated": backdropScene(s, 3, rotate), "perspective": backdropScene(s, 0, turn)}
 }
 
 // TestEffectLargerCanvas checks that an effect drawn from the corner of a

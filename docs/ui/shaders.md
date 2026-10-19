@@ -140,7 +140,9 @@ ui.Box(c).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
 
 The renderers capture the backdrop as they do for the glass plugin's
 panes, every frame, so it follows whatever moves behind. An element's
-effect reads it too. A shader reading its backdrop draws rectangles
+effect reads it too, and an element turned in 3D (`RotateX` with
+`Perspective`, see [Transforms](transforms.md)) reads what is behind each
+of its pixels, in perspective. A shader reading its backdrop draws rectangles
 (`Draw`, `Effect`), not shapes (`Fill`), and reads images 0, 1 and 3 of
 its own; image 2 is the backdrop.
 

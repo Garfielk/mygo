@@ -95,10 +95,10 @@ type uniform struct {
 }
 
 // The bridge's uniforms, which Draw sets: the images' sizes, the
-// rectangle's size, the pixels a DIP and where an effect's box lies in
-// its content, the first words.
+// rectangle's size, the pixels a DIP, where an effect's box lies in its
+// content, and where its backdrop lies, the first words.
 var bridge = []string{shader.ImageSizesUniform, shader.RectSizeUniform, shader.ScaleUniform, shader.LayerInsetUniform,
-	shader.BackdropRow0Uniform, shader.BackdropRow1Uniform, shader.BackdropAreaUniform}
+	shader.BackdropRow0Uniform, shader.BackdropRow1Uniform, shader.BackdropAreaUniform, shader.BackdropRow2Uniform}
 
 // The words of the bridge's uniforms, which Compile checks.
 const (
@@ -107,11 +107,12 @@ const (
 	row0Word    = insetWord + 2
 	row1Word    = row0Word + 3
 	areaWord    = row1Word + 3
-	bridgeWords = areaWord + 4
+	row2Word    = areaWord + 4
+	bridgeWords = row2Word + 3
 )
 
 // bridgeWordsAt are where the bridge's uniforms start, in its order.
-var bridgeWordsAt = []int{0, scaleWord - 2, scaleWord, insetWord, row0Word, row1Word, areaWord}
+var bridgeWordsAt = []int{0, scaleWord - 2, scaleWord, insetWord, row0Word, row1Word, areaWord, row2Word}
 
 // readsBackdrop finds a shader reading its backdrop.
 var readsBackdrop = regexp.MustCompile(`\bbackdrop(At|Sample)\b`)
@@ -386,6 +387,9 @@ func (s *Shader) input(p *ui.Painter, r, area ui.Rect, o Options, inset ui.Point
 		}
 		for k, x := range bk.ToFrame[1] {
 			words[row1Word+k] = math.Float32bits(x)
+		}
+		for k, x := range bk.ToFrame[2] {
+			words[row2Word+k] = math.Float32bits(x)
 		}
 		words[areaWord], words[areaWord+1], words[areaWord+2] = math.Float32bits(bk.Origin[0]), math.Float32bits(bk.Origin[1]), math.Float32bits(bk.Down)
 	}

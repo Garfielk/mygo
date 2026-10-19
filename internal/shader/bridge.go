@@ -32,11 +32,13 @@ const (
 	ScaleUniform      = "__scale"
 	LayerInsetUniform = "__layerInset"
 	// The backdrop of a shader reading it (BackdropImage): the rows of the
-	// map from its positions to the frame's pixels, and where its texels
-	// start in the frame, with how many pixels each covers across.
+	// map from its positions to the frame's pixels, where its texels start
+	// in the frame, with how many pixels each covers across, and the map's
+	// row dividing it, in perspective.
 	BackdropRow0Uniform = "__backdropRow0"
 	BackdropRow1Uniform = "__backdropRow1"
 	BackdropAreaUniform = "__backdropArea"
+	BackdropRow2Uniform = "__backdropRow2"
 )
 
 // BackdropImage is the image a shader reads its backdrop from, through
@@ -65,6 +67,7 @@ var %s vec2
 var %[8]s vec3
 var %[9]s vec3
 var %[10]s vec4
+var %[12]s vec3
 
 // rectSize returns the size of the rectangle the shader fills, in DIPs.
 func rectSize() vec2 {
@@ -93,9 +96,11 @@ func layerSample(p vec2) vec4 {
 }
 
 // __backdropTexel returns where p, in DIPs from the corner of the box the
-// shader fills, lies in the backdrop's texels.
+// shader fills, lies in the backdrop's texels, in perspective where the
+// box is turned in 3D.
 func __backdropTexel(p vec2) vec2 {
-	q := vec2(dot(%[8]s, vec3(p, 1)), dot(%[9]s, vec3(p, 1)))
+	w := max(dot(%[12]s, vec3(p, 1)), 1e-6)
+	q := vec2(dot(%[8]s, vec3(p, 1)), dot(%[9]s, vec3(p, 1))) / w
 	return (q - %[10]s.xy) / %[10]s.z
 }
 
@@ -112,7 +117,7 @@ func backdropSample(p vec2) vec4 {
 	return image%[11]dSample(__backdropTexel(p))
 }
 `, InternalRegionBegin, ImageSizesUniform, MaxImages, RectSizeUniform, ScaleUniform, LayerInsetUniform, LayerImage,
-		BackdropRow0Uniform, BackdropRow1Uniform, BackdropAreaUniform, BackdropImage)
+		BackdropRow0Uniform, BackdropRow1Uniform, BackdropAreaUniform, BackdropImage, BackdropRow2Uniform)
 	for i := range MaxImages {
 		fmt.Fprintf(&b, `
 // image%[1]dSize returns the size of image %[1]d, in its pixels.

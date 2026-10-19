@@ -361,6 +361,58 @@ func Fragment(dst vec4, pos vec2) vec4 {
 	mustPanic("other shader", "not a uniform variable of the values' shader", func() { v.Float(other.Uniform("Split"), 1) })
 }
 
+// A shader on an element turned in perspective reads what is behind
+// each pixel it covers: inverting its backdrop over vertical stripes, it
+// shows the inverse of the stripe under it everywhere.
+func TestBackdropInPerspective(t *testing.T) {
+	invert := shader.MustCompile(`package main
+
+func Fragment(dst vec4, pos vec2) vec4 {
+	b := backdropAt(pos)
+	return vec4(b.a-b.rgb, b.a)
+}
+`)
+	stripe := func(x int) [4]uint8 {
+		if x/10%2 == 0 {
+			return [4]uint8{255, 0, 0, 255}
+		}
+		return [4]uint8{0, 0, 255, 255}
+	}
+	view := func(c *ui.Context) {
+		ui.Row(c).Fill().Center().Children(func() {
+			for range 30 {
+				ui.Box(c).Width(10).FillHeight().Background(ui.RGB(255, 0, 0))
+				ui.Box(c).Width(10).FillHeight().Background(ui.RGB(0, 0, 255))
+			}
+		})
+		ui.Box(c).Absolute().Left(80).Top(60).Size(140, 80).RotateX(45).Perspective(300).Draw(func(p *ui.Painter, r ui.Rect) {
+			invert.Draw(p, r, shader.Options{})
+		})
+	}
+	img := ui.NewTester(view, 300, 200).Image()
+	inverse := func(c [4]uint8) [4]uint8 { return [4]uint8{255 - c[0], 255 - c[1], 255 - c[2], 255} }
+	right, wrong := 0, 0
+	for y := 60; y < 140; y += 4 {
+		for x := 70; x < 230; x++ {
+			if x%10 < 3 || x%10 > 6 {
+				continue // near a stripe's edge
+			}
+			o := img.PixOffset(x, y)
+			// Uncovered pixels show the stripe, and those on the turned
+			// box's edges a blend.
+			switch got := [4]uint8(img.Pix[o : o+4]); got {
+			case inverse(stripe(x)):
+				right++
+			case inverse(stripe(x + 10)):
+				wrong++
+			}
+		}
+	}
+	if right < 400 || wrong > 0 {
+		t.Errorf("%d pixels covered show the stripe under them inverted, and %d the other stripe, want more than 400 and none", right, wrong)
+	}
+}
+
 // A shader reads what the window drew behind it, blurred as asked, from
 // Draw and from an element's effect.
 func TestBackdrop(t *testing.T) {

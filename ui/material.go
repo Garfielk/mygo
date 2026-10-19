@@ -83,11 +83,13 @@ type ShaderInput struct {
 
 // EffectBackdrop is where the backdrop of an effect lies (Painter.
 // EffectBackdrop), as the renderers capture it: ToFrame maps a point in
-// DIPs from a corner to the frame's pixels (x' = ToFrame[0]·(x, y, 1), y'
-// = ToFrame[1]·(x, y, 1)); the texels start at Origin, in the frame's
-// pixels, each Down pixels across, W×H of them.
+// DIPs from a corner to the frame's pixels, in perspective where the
+// effect is turned in 3D (x' = ToFrame[0]·v / w, y' = ToFrame[1]·v / w,
+// with v = (x, y, 1) and w = ToFrame[2]·v, which is 1 in 2D); the texels
+// start at Origin, in the frame's pixels, each Down pixels across, W×H
+// of them.
 type EffectBackdrop struct {
-	ToFrame [2][3]float32
+	ToFrame [3][3]float32
 	Origin  [2]float32
 	Down    float32
 	W, H    int
@@ -106,14 +108,19 @@ func (p *Painter) EffectBackdrop(r Rect, blur float32, inset Point) EffectBackdr
 	// Corner, then the op's local pixels, then the frame's.
 	cx, cy := rect.X+inset.X, rect.Y+inset.Y
 	a, b, c, d, x, y := float32(1), float32(0), float32(0), float32(1), float32(0), float32(0)
+	var g, k float32 // the row dividing in perspective
 	if m.Set {
-		a, b, c, d, x, y = m.A, m.B, m.C, m.D, m.X, m.Y
+		a, b, c, d, x, y, g, k = m.A, m.B, m.C, m.D, m.X, m.Y, m.G, m.H
 	}
 	return EffectBackdrop{
-		ToFrame: [2][3]float32{{a * s, c * s, a*cx + c*cy + x}, {b * s, d * s, b*cx + d*cy + y}},
-		Origin:  [2]float32{float32(bk.Area.Min.X), float32(bk.Area.Min.Y)},
-		Down:    float32(bk.Down),
-		W:       w, H: h,
+		ToFrame: [3][3]float32{
+			{a * s, c * s, a*cx + c*cy + x},
+			{b * s, d * s, b*cx + d*cy + y},
+			{g * s, k * s, g*cx + k*cy + 1},
+		},
+		Origin: [2]float32{float32(bk.Area.Min.X), float32(bk.Area.Min.Y)},
+		Down:   float32(bk.Down),
+		W:      w, H: h,
 	}
 }
 

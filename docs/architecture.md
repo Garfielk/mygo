@@ -3048,7 +3048,8 @@ either.
   `backdropSample`) is an effect with `Backdrop`: `Painter.EffectBackdrop`
   computes the backdrop as the builder will (`scene.BackdropOf` of the
   op's bounds), the bridge maps positions to its texels
-  (`__backdropRow0`, `__backdropRow1`, `__backdropArea`), and the
+  (`__backdropRow0`, `__backdropRow1`, `__backdropArea`, and, in
+  perspective, `__backdropRow2`, which divides them), and the
   renderers bind their backdrop texture as its image 2
   (`gpu.BackdropImage`); the CPU twin reads `scene.BackdropImage`. Direct3D's compiler takes from 0.1 s to more than 1 s
   for a shader's effect (the renderer's head and tail, with its coverage,
