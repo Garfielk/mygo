@@ -55,7 +55,7 @@ func (e ScrollEdge) PaintMaterial(p *ui.Painter, box ui.Rect, radii [4]float32) 
 	b := hardEdgeBlur * s
 	c := toned([3]float32{float32(bg.R) / 255, float32(bg.G) / 255, float32(bg.B) / 255}, 0.947, 0.03)
 	p2, p3 := blurTone{saturation: 0.25, offset: 0.03, mix: 0.8245, color: c}.params()
-	p.Effect(blurEffect, box, radii, b, [5][4]float32{{}, {b, b, -1, 0}, p2, p3})
+	p.Effect(blurEffect, box, radii, b, [5][4]float32{{}, {b, b, -1, b}, p2, p3})
 	// The hairline along the other edge, outside it, half a DIP: black at
 	// 10% in light mode, white at 7% in dark mode.
 	line := ui.RGBA(0, 0, 0, 0.1)

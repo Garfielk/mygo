@@ -1,9 +1,11 @@
 // A level of the blur's effect in Metal Shading Language (see
 // scene.Effect and blurLevel), as blur.go draws it on the CPU. p0 is the
 // mask's line, from its start to its end in pixels; p1 the blur at its
-// start and at its end, and the level's band, from p1.z to p1.w; p2 and p3
-// its tone (blurTone): how much more saturated, the offset and how much of
-// the color p3 over it.
+// start and at its end, and the level's band, from p1.z to p1.w, which it
+// shows only within with 1 in p2.w, mixing its second backdrop (the level
+// below's blur) into its own along it with 1 in p3.w; p2 and p3 its tone
+// (blurTone): how much more saturated, the offset and how much of the
+// color p3 over it.
 
 // blurAt returns the backdrop's texel p, with its alpha, clamped to its
 // edges.
@@ -23,7 +25,7 @@ float4 blurSample(texture2d<float> t, Effect e, float2 q) {
 	return top * (1.0f - w.y) + bot * w.y;
 }
 
-float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
+float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2) {
 	float2 d = e.p0.zw - e.p0.xy;
 	float l = d.x * d.x + d.y * d.y;
 	float t = 0.0f;
@@ -31,11 +33,15 @@ float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
 		t = clamp(((p.x - e.p0.x) * d.x + (p.y - e.p0.y) * d.y) / max(l, 0.0001f), 0.0f, 1.0f);
 	}
 	float blur = e.p1.x * (1.0f - t) + e.p1.y * t;
-	float w = clamp((blur - e.p1.z) / (e.p1.w - e.p1.z), 0.0f, 1.0f);
-	if (w <= 0.0f) {
+	if (blur <= e.p1.z || (e.p2.w > 0.5f && blur > e.p1.w)) {
 		return float4(0.0f);
 	}
+	float w = clamp((blur - e.p1.z) / (e.p1.w - e.p1.z), 0.0f, 1.0f);
 	float4 c = blurSample(backdrop, e, p);
+	if (e.p3.w > 0.5f) {
+		c = mix(blurSample(backdrop2, e, p), c, w);
+		w = 1.0f;
+	}
 	float lum = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 	c.rgb = clamp(lum + (c.rgb - lum) * (1.0f + e.p2.x) + e.p2.y * c.a, 0.0f, c.a);
 	c += (float4(e.p3.rgb, 1.0f) - c) * e.p2.z;

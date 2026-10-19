@@ -43,16 +43,23 @@ func (b Blur) String() string {
 }
 
 // blurLevel is a step of a blur that varies across its element: what was
-// painted under it, the levels before included, blurred by blur pixels,
-// shown where the blur the element wants is more than lo pixels, by how
-// far it is toward hi, and wholly from hi.
+// painted under the element, blurred by blur pixels, where the blur the
+// element wants is more than lo pixels and at most hi, the level's band,
+// in which it mixes into the blur of the level before it by how far the
+// blur wanted is toward hi; blur is hi. The last level shows wherever the
+// blur wanted is more than its lo, and a first level of the least blur
+// wanted (lo -1) where it is that least, mixing into none.
 //
-// Blurs add up as their variances do, so after the levels showing
-// wholly at a pixel, what shows there is blurred by hi pixels of the last
-// of them: the levels' his double from one level to the next, from at
-// most finestLevel pixels to the blur's most, and between two, a pixel
-// shows the blurs of both, mixed, which the eye takes for a blur between
-// them. A blur that does not vary is one level, which shows everywhere.
+// The levels' his double from one level to the next, from at most
+// finestLevel pixels to the blur's most, and a pixel between two shows the
+// blurs of both, mixed, which the eye takes for a blur between them, as
+// Core Animation's variable blur mixes the levels of its pyramid. Each
+// level is drawn only over its band, reading what is under it there, and
+// all read the one backdrop the first read (scene.EffectOp.Shared): the
+// frame read once, each level's blurs of it, its own and its second
+// backdrop (EffectOp.Backdrop2) with the level before's, in texels of its
+// own blur's size, over only its band. A blur that does not vary is
+// one level, which shows everywhere.
 type blurLevel struct{ blur, lo, hi float32 }
 
 // finestLevel is the most the first level of a varying blur blurs, in
@@ -71,7 +78,7 @@ func blurLevels(least, most float32) []blurLevel {
 		if least <= 0 {
 			return nil
 		}
-		return []blurLevel{{blur: least, lo: -1, hi: 0}}
+		return []blurLevel{{blur: least, lo: -1, hi: least}}
 	}
 	// The levels' his, from the most down, halving.
 	his := []float32{most}
@@ -81,12 +88,12 @@ func blurLevels(least, most float32) []blurLevel {
 	}
 	var levels []blurLevel
 	if least > 0 {
-		levels = append(levels, blurLevel{blur: least, lo: -1, hi: 0})
+		levels = append(levels, blurLevel{blur: least, lo: -1, hi: least})
 	}
 	lo := least
 	for i := len(his) - 1; i >= 0; i-- {
 		hi := his[i]
-		levels = append(levels, blurLevel{blur: sqrt(hi*hi - lo*lo), lo: lo, hi: hi})
+		levels = append(levels, blurLevel{blur: hi, lo: lo, hi: hi})
 		lo = hi
 	}
 	return levels
@@ -102,14 +109,15 @@ func paintBlur(p *ui.Painter, box ui.Rect, radii [4]float32, b Blur) {
 	px := scene.Rect{X: round(box.X * s), Y: round(box.Y * s)}
 	px.W, px.H = round((box.X+box.W)*s)-px.X, round((box.Y+box.H)*s)-px.Y
 	blurOps(px, radii == [4]float32{}, b.Radius*s, b.Mask, func(r scene.Rect, fx scene.EffectOp) {
-		p.Effect(fx.Effect, ui.Rect{X: r.X / s, Y: r.Y / s, W: r.W / s, H: r.H / s}, radii, fx.Blur, fx.Params)
+		p.EffectOp(ui.Rect{X: r.X / s, Y: r.Y / s, W: r.W / s, H: r.H / s}, radii, fx)
 	})
 }
 
 // blurOps calls op with the rectangle and the effect of each level
 // (blurLevels) of a blur of most pixels over r, in pixels, along mask: a
-// level after another, each where the blur is more than its lo when r is
-// square, which it then reads only what is under.
+// level after another, the levels after the first sharing its backdrop,
+// each over its band when r is square, which it then reads only what is
+// under.
 func blurOps(r scene.Rect, square bool, most float32, mask *ui.LinearGradient, op func(r scene.Rect, fx scene.EffectOp)) {
 	if r.W <= 0 || r.H <= 0 || most <= 0 {
 		return
@@ -121,15 +129,38 @@ func blurOps(r scene.Rect, square bool, most float32, mask *ui.LinearGradient, o
 		line = maskLine(r, *mask)
 		at0, at1 = most*float32(mask.From.A)/255, most*float32(mask.To.A)/255
 	}
-	for _, l := range blurLevels(min(at0, at1), max(at0, at1)) {
+	levels := blurLevels(min(at0, at1), max(at0, at1))
+	shared := false
+	for k, l := range levels {
+		last := k == len(levels)-1
+		fx := scene.EffectOp{Effect: blurEffect, Blur: l.blur, Params: [5][4]float32{line, {at0, at1, l.lo, l.hi}}, Shared: shared}
+		if !last {
+			fx.Params[2][3] = 1
+		}
+		if l.lo >= 0 {
+			// It mixes into the level before's blur, or what is under it
+			// unblurred for the first.
+			fx.Backdrop2, fx.Params[3][3] = true, 1
+			if k > 0 {
+				fx.Blur2 = levels[k-1].blur
+			}
+		}
 		lr := r
-		if square && l.lo >= 0 {
+		if square {
+			lo, hi := l.lo, l.hi
+			if lo < 0 {
+				lo = float32(math.Inf(-1))
+			}
+			if last {
+				hi = float32(math.Inf(1))
+			}
 			var ok bool
-			if lr, ok = blurWanted(r, line, at0, at1, l.lo); !ok {
+			if lr, ok = blurWanted(r, line, at0, at1, lo, hi); !ok {
 				continue
 			}
 		}
-		op(lr, scene.EffectOp{Effect: blurEffect, Blur: l.blur, Params: [5][4]float32{line, {at0, at1, l.lo, l.hi}}})
+		op(lr, fx)
+		shared = true
 	}
 }
 
@@ -158,39 +189,31 @@ func maskLine(r scene.Rect, g ui.LinearGradient) [4]float32 {
 
 // blurWanted returns the bounds, in whole pixels, of the part of r where
 // the blur along line, from at0 at its start to at1 at its end, is more
-// than lo, and whether there is one.
-func blurWanted(r scene.Rect, line [4]float32, at0, at1, lo float32) (scene.Rect, bool) {
+// than lo and at most hi, and whether there is one.
+func blurWanted(r scene.Rect, line [4]float32, at0, at1, lo, hi float32) (scene.Rect, bool) {
 	if at0 == at1 {
-		return r, at0 > lo
+		return r, at0 > lo && at0 <= hi
 	}
-	// Along the line, the blur is lo at tc, and more on one side of it:
-	// the side of the half-plane n·p > c.
+	// Along the line, the blur grows by k a pixel, from at0 at its start:
+	// it is more than lo, and at most hi, in half-planes, which cut the
+	// rectangle's corners down to a polygon.
 	dx, dy := line[2]-line[0], line[3]-line[1]
-	tc := (lo - at0) / (at1 - at0)
-	nx, ny := dx, dy
-	c := line[0]*dx + line[1]*dy + tc*(dx*dx+dy*dy)
-	if at1 < at0 {
-		nx, ny, c = -nx, -ny, -c
+	k := (at1 - at0) / (dx*dx + dy*dy)
+	blur := func(p [2]float32) float32 { return at0 + k*((p[0]-line[0])*dx+(p[1]-line[1])*dy) }
+	poly := [][2]float32{{r.X, r.Y}, {r.X + r.W, r.Y}, {r.X + r.W, r.Y + r.H}, {r.X, r.Y + r.H}}
+	if !math.IsInf(float64(lo), -1) {
+		poly = cut(poly, func(p [2]float32) float32 { return blur(p) - lo })
 	}
-	corners := [4][2]float32{{r.X, r.Y}, {r.X + r.W, r.Y}, {r.X + r.W, r.Y + r.H}, {r.X, r.Y + r.H}}
+	if !math.IsInf(float64(hi), 1) {
+		poly = cut(poly, func(p [2]float32) float32 { return hi - blur(p) })
+	}
+	if len(poly) == 0 {
+		return scene.Rect{}, false
+	}
 	x0, y0 := float32(math.Inf(1)), float32(math.Inf(1))
 	x1, y1 := float32(math.Inf(-1)), float32(math.Inf(-1))
-	add := func(x, y float32) {
-		x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x), max(y1, y)
-	}
-	for i, a := range corners {
-		b := corners[(i+1)%4]
-		fa, fb := nx*a[0]+ny*a[1]-c, nx*b[0]+ny*b[1]-c
-		if fa > 0 {
-			add(a[0], a[1])
-		}
-		if (fa > 0) != (fb > 0) {
-			k := fa / (fa - fb)
-			add(a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k)
-		}
-	}
-	if x0 > x1 || y0 > y1 {
-		return scene.Rect{}, false
+	for _, p := range poly {
+		x0, y0, x1, y1 = min(x0, p[0]), min(y0, p[1]), max(x1, p[0]), max(y1, p[1])
 	}
 	x0, y0 = max(floor(x0), r.X), max(floor(y0), r.Y)
 	x1, y1 = min(ceil(x1), r.X+r.W), min(ceil(y1), r.Y+r.H)
@@ -200,10 +223,29 @@ func blurWanted(r scene.Rect, line [4]float32, at0, at1, lo float32) (scene.Rect
 	return scene.Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}, true
 }
 
+// cut returns the part of the convex polygon poly where f, linear, is
+// more than 0.
+func cut(poly [][2]float32, f func(p [2]float32) float32) [][2]float32 {
+	var out [][2]float32
+	for i, a := range poly {
+		b := poly[(i+1)%len(poly)]
+		fa, fb := f(a), f(b)
+		if fa > 0 {
+			out = append(out, a)
+		}
+		if (fa > 0) != (fb > 0) {
+			t := fa / (fa - fb)
+			out = append(out, [2]float32{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t})
+		}
+	}
+	return out
+}
+
 // blurTone is what a level does to the colors it shows, which a blur's
 // levels leave as they are: saturation more saturation (0 for as is),
 // offset added to each channel, and mix of the opaque color over it, in
-// its parameters p2 and p3, as a scroll edge's hard style frosts.
+// its parameters p2 and p3 (but for p2.w and p3.w, which say how the level
+// shows), as a scroll edge's hard style frosts.
 type blurTone struct {
 	saturation, offset, mix float32
 	color                   [3]float32
@@ -211,7 +253,7 @@ type blurTone struct {
 
 // params returns the tone's parameters, p2 and p3.
 func (t blurTone) params() (p2, p3 [4]float32) {
-	return [4]float32{t.saturation, t.offset, t.mix}, [4]float32{t.color[0], t.color[1], t.color[2], 1}
+	return [4]float32{t.saturation, t.offset, t.mix}, [4]float32{t.color[0], t.color[1], t.color[2]}
 }
 
 // blurPixels draws a level of a blur on the CPU, as its shaders do on the
@@ -226,36 +268,45 @@ func (px *blurPixels) Begin(op *scene.EffectOp, _ scene.Rect, _ [4]float32) {
 }
 
 // Color returns the color of the level at the pixel center (x, y), as the
-// shaders' effect does: the backdrop, toned, by how much the level shows
-// there.
+// shaders' effect does: none outside its band, and in it the backdrop,
+// mixed into the second by how far the blur is into the band, or by how
+// much it shows there over what is under it, toned.
 func (px *blurPixels) Color(x, y float32, b *scene.BackdropImage) [4]float32 {
-	w := px.weight(x, y)
-	if w <= 0 {
+	band := &px.band
+	blur := px.blur(x, y)
+	if blur <= band[2] || px.tone[3] > 0.5 && blur > band[3] {
 		return [4]float32{}
 	}
+	w := min(max((blur-band[2])/(band[3]-band[2]), 0), 1)
 	c := sampleRGBA(b, x, y)
-	t := &px.tone
-	l := 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]
-	for i := range 3 {
-		c[i] = min(max(l+(c[i]-l)*(1+t[0])+t[1]*c[3], 0), c[3])
+	if px.color[3] > 0.5 {
+		c2 := sampleRGBA(b.Second, x, y)
+		for i := range c {
+			c[i] = c2[i] + (c[i]-c2[i])*w
+		}
+		w = 1
 	}
+	tn := &px.tone
+	lum := 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]
+	for i := range 3 {
+		c[i] = min(max(lum+(c[i]-lum)*(1+tn[0])+tn[1]*c[3], 0), c[3])
+	}
+	color := [4]float32{px.color[0], px.color[1], px.color[2], 1}
 	for i := range c {
-		c[i] += (px.color[i] - c[i]) * t[2]
+		c[i] += (color[i] - c[i]) * tn[2]
 	}
 	return [4]float32{c[0] * w, c[1] * w, c[2] * w, c[3] * w}
 }
 
-// weight returns how much the level shows at (x, y), from 0 to 1: by how
-// far the blur there, along the mask, is into its band.
-func (px *blurPixels) weight(x, y float32) float32 {
+// blur returns the blur wanted at (x, y), along the mask.
+func (px *blurPixels) blur(x, y float32) float32 {
 	l, band := &px.line, &px.band
 	dx, dy := l[2]-l[0], l[3]-l[1]
 	t := float32(0)
 	if d := dx*dx + dy*dy; d > 0 {
 		t = min(max(((x-l[0])*dx+(y-l[1])*dy)/max(d, 0.0001), 0), 1)
 	}
-	blur := band[0]*(1-t) + band[1]*t
-	return min(max((blur-band[2])/(band[3]-band[2]), 0), 1)
+	return band[0]*(1-t) + band[1]*t
 }
 
 // sampleRGBA returns the backdrop at (x, y) with its alpha, premultiplied,

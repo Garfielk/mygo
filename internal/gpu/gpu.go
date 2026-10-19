@@ -12,7 +12,10 @@
 // average it over squares (the pass "down") into a texture, blur that
 // along rows into another and along columns back (the pass "blur"),
 // keeping 8 bits a channel, and bind it for the batch (the shaders'
-// backdrop texture), as internal/raster computes it.
+// backdrop texture), as internal/raster computes it. Effects sharing a
+// backdrop (scene.EffectOp.Shared) are a group of batches whose
+// backdrops a renderer computes in one step, before the first of them
+// draws, each into a texture of its own (Batch.Group).
 //
 // The shaders write a second color for blending, the source's alpha for
 // each channel: the alpha of the color for everything but subpixel
@@ -126,6 +129,19 @@ type Batch struct {
 	// drawing it.
 	Effect   *scene.Effect
 	Backdrop int
+	// Backdrop2, unless 0, is 1 + the index in Builder.Backdrops of the
+	// effect's second backdrop (scene.EffectOp.Backdrop2), which the
+	// renderer binds beside the first.
+	Backdrop2 int
+	// Group, for a batch reading its backdrop, is the indices in
+	// Builder.Backdrops of the backdrops of its group, from the first to
+	// past the last: the batches of effects sharing a backdrop
+	// (scene.EffectOp.Shared), whose backdrops the renderer computes
+	// together, from the frame as it is before the first of them draws,
+	// each into a texture of its own, the Backdrop-1-Group[0]th (and the
+	// Backdrop2-1-Group[0]th), which it binds for the batch. A batch
+	// sharing none is a group of its own.
+	Group [2]int
 	// Shader is the effect's op, for a shader's (Effect.Shader), and
 	// Textures the renderer's textures of its images, 0 for none.
 	Shader   *scene.EffectOp
@@ -224,6 +240,9 @@ type Builder struct {
 	Instances []Instance
 	Batches   []Batch
 	Backdrops []scene.Backdrop
+	// groupOp is the first op of the last group of batches sharing a
+	// backdrop (Batch.Group), whose first backdrop is groupFirst.
+	groupOp, groupFirst int
 	// Stops holds the stops of the gradients the instances draw with
 	// (scene.Stop), two RGBA texels of 32-bit floats each, StopsWidth to
 	// a row: the color, straight sRGB, then its place and its color in
@@ -380,6 +399,19 @@ func (b *Builder) BackdropSize() (w, h int) {
 	return w, h
 }
 
+// BackdropGroup returns how many backdrops the largest group of batches
+// sharing one reads (Batch.Group): how many textures of BackdropSize a
+// renderer holds the backdrops of a group in.
+func (b *Builder) BackdropGroup() int {
+	n := 0
+	for i := range b.Batches {
+		if g := b.Batches[i].Group; b.Batches[i].Backdrop != 0 {
+			n = max(n, g[1]-g[0])
+		}
+	}
+	return n
+}
+
 type clip struct {
 	rect    scene.Rect
 	radii   [4]float32
@@ -429,6 +461,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 	b.Instances = b.Instances[:0]
 	b.Batches = b.Batches[:0]
 	b.Backdrops = b.Backdrops[:0]
+	b.groupOp = -1
 	b.Stops = b.Stops[:0]
 	b.OpaqueCores = 0
 	b.joinSmall = false
@@ -570,7 +603,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			}
 		case scene.OpEffect:
 			if !op.Rect.Empty() && int(op.Start) < len(s.Effects) && s.Effects[op.Start].Effect != nil {
-				b.addEffect(s, op)
+				b.addEffect(s, i, op)
 			}
 		case scene.OpHole:
 			if !op.Rect.Empty() {
@@ -1003,9 +1036,10 @@ func (b *Builder) addFill(s *scene.Scene, in Instance, op *scene.Op) {
 	b.addAround(in, op.Transform, core)
 }
 
-// addEffect appends the instance of an effect within the current clip, in
-// a batch of its own, which reads its backdrop first when it reads one.
-func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
+// addEffect appends the instance of op i of s, an effect, within the
+// current clip, in a batch of its own, which reads its backdrop first
+// when it reads one, with the batches before it sharing it.
+func (b *Builder) addEffect(s *scene.Scene, i int, op *scene.Op) {
 	cur := &b.stack[len(b.stack)-1]
 	if cur.scissor.Empty() {
 		return
@@ -1035,18 +1069,39 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		}
 	}
 	if fx.Effect.Backdrop {
-		bk := s.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, s.Width, s.Height)
+		bk, bk2 := s.Backdrops(op, s.Width, s.Height)
 		if bk.Area.Empty() {
 			return
 		}
 		b.Backdrops = append(b.Backdrops, bk)
 		batch.Backdrop = len(b.Backdrops)
+		if fx.Backdrop2 {
+			b.Backdrops = append(b.Backdrops, bk2)
+			batch.Backdrop2 = len(b.Backdrops)
+		}
+		batch.Group = b.joinGroup(s, i, batch.Backdrop-1, len(b.Backdrops))
 		tw, th := bk.Size()
 		in.UV = [4]float32{float32(bk.Area.Min.X), float32(bk.Area.Min.Y), float32(tw), float32(th)}
 		in.Params[2] = float32(bk.Down)
 	}
 	b.Batches = append(b.Batches, batch)
 	b.Instances = append(b.Instances, in)
+}
+
+// joinGroup returns the group of the backdrops from k to end of op i of
+// s (Batch.Group): that of the batches before it of its run of effects
+// sharing a backdrop, which grows to them, or their own.
+func (b *Builder) joinGroup(s *scene.Scene, i, k, end int) [2]int {
+	first := scene.BackdropGroup(s, i)
+	if first == b.groupOp && first != i {
+		// The batches of the group so far are the last.
+		for j := len(b.Batches) - 1; j >= 0 && b.Batches[j].Backdrop != 0 && b.Batches[j].Group[0] == b.groupFirst; j-- {
+			b.Batches[j].Group[1] = end
+		}
+		return [2]int{b.groupFirst, end}
+	}
+	b.groupOp, b.groupFirst = first, k
+	return [2]int{k, end}
 }
 
 // addMaskedEffect appends the instances of a shader's effect filling mask

@@ -17,7 +17,7 @@ import (
 // a head and a tail of its own, which declare what it reads and call it
 // (EffectSource in packages metal, d3d11 and gl):
 //
-//	Metal: float4 effect(float2 p, Effect e, texture2d<float> backdrop)
+//	Metal: float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2)
 //	HLSL:  float4 effect(float2 p, Effect e)
 //	GLSL:  vec4 effect(vec2 p, Effect e)
 //
@@ -31,7 +31,10 @@ import (
 // the sRGB gamut, in extended sRGB (Scene.Wide), which the effect may then
 // take from a parameter holding such a color (ui.Painter.EffectColor).
 // sampleBackdrop(e, q) (with the backdrop texture first in Metal) returns
-// the backdrop at q, premultiplied, as BackdropImage.Sample does.
+// the backdrop at q, premultiplied, as BackdropImage.Sample does. An
+// effect reading a second backdrop (EffectOp.Backdrop2) reads its texels
+// as the first's, from backdrop2 in Metal, backdrop2Tex in HLSL and
+// uBackdrop2 in GLSL.
 type Effect struct {
 	// Name names the effect in errors.
 	Name string
@@ -103,6 +106,19 @@ type EffectOp struct {
 	// Blur is the standard deviation of the blur of the backdrop, in
 	// pixels, for an effect that reads its backdrop.
 	Blur float32
+	// Shared, for an effect reading its backdrop right after another op
+	// that does, has it read what that one read, the frame as it was
+	// before it drew, blurred by its own Blur: the effects of such a run
+	// read one backdrop, which renderers read once, computing every
+	// effect's blur of it before drawing the first (BackdropGroup).
+	Shared bool
+	// Backdrop2, for an effect reading its backdrop, has it read it
+	// again, blurred by Blur2: its second backdrop, the shaders' backdrop2
+	// (BackdropImage.Second on the CPU), as the levels of a blur varying
+	// across its element mix two blurs of it. Both have the same texels
+	// (Scene.Backdrops), which the shaders read the same way.
+	Backdrop2 bool
+	Blur2     float32
 	// Params are the effect's own, which its shaders read as e.p0 to e.p4.
 	Params [5][4]float32
 	// Uniforms and Images are what a shader's effect reads
@@ -126,6 +142,33 @@ type EffectOp struct {
 	Origin [2]float32
 }
 
+// BackdropGroup returns the first op of the run of effects reading one
+// backdrop (EffectOp.Shared) that op i of s, an effect reading its
+// backdrop, is in: i itself unless it shares the backdrop of the op
+// before it.
+func BackdropGroup(s *Scene, i int) int {
+	for i > 0 && sharesBackdrop(s, i) {
+		i--
+	}
+	return i
+}
+
+// sharesBackdrop reports whether op i of s reads the backdrop op i-1 read.
+func sharesBackdrop(s *Scene, i int) bool {
+	reads := func(i int) *EffectOp {
+		op := &s.Ops[i]
+		if op.Kind != OpEffect || int(op.Start) >= len(s.Effects) {
+			return nil
+		}
+		if fx := &s.Effects[op.Start]; fx.Effect != nil && fx.Effect.Backdrop {
+			return fx
+		}
+		return nil
+	}
+	fx := reads(i)
+	return fx != nil && fx.Shared && reads(i-1) != nil
+}
+
 // Masked reports whether op paints mask glyphs (Glyphs).
 func (op *EffectOp) Masked() bool { return op.Glyphs[1] > op.Glyphs[0] }
 
@@ -133,7 +176,7 @@ func (op *EffectOp) Masked() bool { return op.Glyphs[1] > op.Glyphs[0] }
 // parameters, the same uniforms and no images, whose pixels may change.
 // Glyphs are compared by what they point at, which the caller does.
 func (op *EffectOp) Same(o *EffectOp) bool {
-	if op.Effect != o.Effect || op.Blur != o.Blur || op.Params != o.Params || len(op.Uniforms) != len(o.Uniforms) ||
+	if op.Effect != o.Effect || op.Blur != o.Blur || op.Shared != o.Shared || op.Backdrop2 != o.Backdrop2 || op.Blur2 != o.Blur2 || op.Params != o.Params || len(op.Uniforms) != len(o.Uniforms) ||
 		op.Masked() != o.Masked() || op.Glyphs[1]-op.Glyphs[0] != o.Glyphs[1]-o.Glyphs[0] || op.Origin != o.Origin {
 		return false
 	}
@@ -190,11 +233,36 @@ type Backdrop struct {
 // average of each square adds a variance of Down²/12 pixels², which the
 // blur leaves out.
 func BackdropOf(r Rect, blur float32, w, h int) Backdrop {
-	blur = max(blur, 0)
+	return backdropOf(r, blur, downOf(blur), w, h)
+}
+
+// downOf returns the squares a backdrop blurred by blur averages
+// (Backdrop.Down).
+func downOf(blur float32) int {
 	down := 1
 	for down < 8 && blur/float32(2*down) >= 2 {
 		down *= 2
 	}
+	return down
+}
+
+// BackdropsOf returns the backdrops of a shape r blurred by blur and by
+// blur2, in a frame of w×h pixels: their texels the same, over what the
+// larger reaches, averaging the squares of the larger, whose texels the
+// smaller blurs by fewer than BackdropOf's two when it is half or less,
+// as a blur's levels (in the glass plugin) mix one blur with half of it,
+// at half the cost of the smaller's squares.
+func BackdropsOf(r Rect, blur, blur2 float32, w, h int) (Backdrop, Backdrop) {
+	down := downOf(max(max(blur, blur2), 0))
+	a, b := backdropOf(r, blur, down, w, h), backdropOf(r, blur2, down, w, h)
+	a.Area = a.Area.Union(b.Area)
+	b.Area = a.Area
+	return a, b
+}
+
+// backdropOf is BackdropOf averaging squares of down pixels.
+func backdropOf(r Rect, blur float32, down, w, h int) Backdrop {
+	blur = max(blur, 0)
 	sigma := float32(math.Sqrt(math.Max(float64(blur*blur)-float64(down*down)/12, 0))) / float32(down)
 	if blur == 0 {
 		sigma = 0
@@ -260,6 +328,9 @@ type BackdropImage struct {
 	Transform Affine
 	W, H      int
 	Pix       []float32
+	// Second is the effect's second backdrop (EffectOp.Backdrop2), of the
+	// same texels, or nil.
+	Second *BackdropImage
 }
 
 // Sample returns the backdrop at (x, y), in the frame's pixels,

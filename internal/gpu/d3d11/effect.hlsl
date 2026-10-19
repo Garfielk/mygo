@@ -5,6 +5,9 @@
 // 1 in params.y, a mask glyph a shader's effect fills.
 
 Texture2D backdropTex : register(t3);
+// An effect's second backdrop (scene.EffectOp.Backdrop2), whose texels
+// are those of the first: area and down read both.
+Texture2D backdrop2Tex : register(t11);
 
 // What an effect reads of its instance.
 struct Effect {

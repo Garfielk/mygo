@@ -10,9 +10,9 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestBlurLevels checks that a varying blur's levels add up to its most,
-// halving from there down to the finest, and that one that does not vary
-// is a level showing everywhere.
+// TestBlurLevels checks that a varying blur's levels each blur by their
+// hi, halving from its most down to the finest, one band after another,
+// and that one that does not vary is a level showing everywhere.
 func TestBlurLevels(t *testing.T) {
 	for _, c := range []struct {
 		least, most float32
@@ -26,31 +26,31 @@ func TestBlurLevels(t *testing.T) {
 		if c.n == 0 {
 			continue
 		}
-		// The variances add up to the most's.
-		var v float64
 		for _, l := range levels {
-			v += float64(l.blur * l.blur)
+			if l.blur != l.hi {
+				t.Errorf("%v to %v: a level blurs by %v, to show from %v to %v", c.least, c.most, l.blur, l.lo, l.hi)
+			}
 		}
-		if math.Abs(math.Sqrt(v)-float64(max(c.most, c.least))) > 1e-3 {
-			t.Errorf("%v to %v: the levels blur by %v in all: %v", c.least, c.most, math.Sqrt(v), levels)
+		if last := levels[len(levels)-1]; last.blur != max(c.most, c.least) {
+			t.Errorf("%v to %v: the last level blurs by %v", c.least, c.most, last.blur)
 		}
-		last := levels[len(levels)-1]
-		if c.most > c.least && last.hi != c.most {
-			t.Errorf("%v to %v: the last level ends at %v", c.least, c.most, last.hi)
+		if first := levels[0]; c.least > 0 && (first.lo >= 0 || first.hi != c.least) {
+			t.Errorf("%v to %v: the first level is %v", c.least, c.most, first)
 		}
 		for i := 1; i < len(levels); i++ {
-			if levels[i].lo != levels[i-1].hi && levels[i-1].lo >= 0 {
+			if levels[i].lo != levels[i-1].hi {
 				t.Errorf("%v to %v: level %d starts at %v, after %v", c.least, c.most, i, levels[i].lo, levels[i-1].hi)
 			}
 		}
-		if first := levels[0]; first.lo >= 0 && first.hi > finestLevel && first.lo == 0 {
+		if first := levels[0]; first.lo == 0 && first.hi > finestLevel {
 			t.Errorf("%v to %v: the first level blurs by %v, over what is not blurred", c.least, c.most, first.hi)
 		}
 	}
 }
 
-// TestBlurWanted checks that a level's rectangle holds every pixel it
-// shows at, and little more, at any angle of the mask.
+// TestBlurWanted checks that a level's rectangle holds every pixel of its
+// band, and little more, at any angle of the mask, and that every pixel
+// blurred is in the band of one level.
 func TestBlurWanted(t *testing.T) {
 	r := scene.Rect{X: 10, Y: 20, W: 200, H: 80}
 	for _, g := range []ui.LinearGradient{
@@ -63,17 +63,24 @@ func TestBlurWanted(t *testing.T) {
 	} {
 		at0, at1 := 20*float32(g.From.A)/255, 20*float32(g.To.A)/255
 		line := maskLine(r, g)
-		for _, l := range blurLevels(min(at0, at1), max(at0, at1)) {
-			if l.lo < 0 {
-				continue
-			}
+		levels := blurLevels(min(at0, at1), max(at0, at1))
+		in := make([]int, int(r.W*r.H))
+		for k, l := range levels {
 			px := blurPixels{line: line, band: [4]float32{at0, at1, l.lo, l.hi}}
-			got, ok := blurWanted(r, line, at0, at1, l.lo)
+			lo, hi := l.lo, l.hi
+			if lo < 0 {
+				lo = float32(math.Inf(-1))
+			}
+			if k+1 == len(levels) {
+				hi = float32(math.Inf(1))
+			}
+			got, ok := blurWanted(r, line, at0, at1, lo, hi)
 			shown := image.Rectangle{}
 			for y := int(r.Y); y < int(r.Y+r.H); y++ {
 				for x := int(r.X); x < int(r.X+r.W); x++ {
-					if px.weight(float32(x)+0.5, float32(y)+0.5) > 0 {
+					if b := px.blur(float32(x)+0.5, float32(y)+0.5); b > lo && b <= hi {
 						shown = shown.Union(image.Rect(x, y, x+1, y+1))
+						in[(y-int(r.Y))*int(r.W)+x-int(r.X)]++
 					}
 				}
 			}
@@ -89,6 +96,19 @@ func TestBlurWanted(t *testing.T) {
 			// centers.
 			if !shown.Empty() && !want.In(shown.Inset(-2)) {
 				t.Errorf("%+v, level %v: %v is much larger than where it shows, %v", g, l, want, shown)
+			}
+		}
+		// Where the blur wanted is none, no level shows.
+		none := blurPixels{line: line, band: [4]float32{at0, at1}}
+		for i, n := range in {
+			x, y := float32(i%int(r.W))+r.X+0.5, float32(i/int(r.W))+r.Y+0.5
+			want := 0
+			if none.blur(x, y) > 0 {
+				want = 1
+			}
+			if n != want {
+				t.Errorf("%+v: (%v, %v) is in %d levels' bands", g, x, y, n)
+				break
 			}
 		}
 	}
@@ -224,7 +244,7 @@ func blurScene() *scene.Scene {
 	// A hard scroll edge's tone, over the edge of nothing.
 	p2, p3 := blurTone{saturation: 0.25, offset: 0.03, mix: 0.6, color: [3]float32{0.9, 0.95, 1}}.params()
 	s.Ops = append(s.Ops, scene.Op{Kind: scene.OpEffect, Rect: scene.Rect{X: 234, Y: 0, W: 86, H: 16}, Start: int32(len(s.Effects))})
-	s.Effects = append(s.Effects, scene.EffectOp{Effect: blurEffect, Blur: 4, Params: [5][4]float32{{}, {4, 4, -1, 0}, p2, p3}})
+	s.Effects = append(s.Effects, scene.EffectOp{Effect: blurEffect, Blur: 4, Params: [5][4]float32{{}, {4, 4, -1, 4}, p2, p3}})
 	return s
 }
 

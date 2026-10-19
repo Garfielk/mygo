@@ -49,7 +49,7 @@ func metalEffect(p *shaderir.Program, words []uint32) string {
 	return msl.Fragment(p, "shaderFragment") + fmt.Sprintf(`
 constant uint shaderUniforms[%d] = {%s};
 
-float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
+float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2) {
 	constant Uniforms& u = *(constant Uniforms*)shaderUniforms;
 	return shaderFragment(u, backdrop, backdrop, backdrop, backdrop, float4(p, 0.0f, 1.0f), p - e.rect.xy);
 }

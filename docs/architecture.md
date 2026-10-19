@@ -1161,12 +1161,16 @@ build` like mygo-runtime and released with the same version.
   itself, as the heads' `sampleBackdrop` gives no alpha), so over nothing
   it stays transparent. Masked by a `LinearGradient`, the blur varies as
   the gradient's alpha (`blurLevels`): the element paints levels in turn,
-  each blurring what the levels before painted (blurs add as their
-  variances do), shown where the blur wanted is above its band, by how far
-  into the band, so a level's top doubles from at most 2 pixels to the
-  blur's most and a pixel between two levels mixes their blurs. A level of
-  a square element covers only where it shows (`blurWanted`), and so
-  reads less. Bounding the levels after the first to the element, so that
+  their blurs doubling from at most 2 pixels to the blur's most, each
+  shown only over its band, where the blur wanted is more than the level
+  before's and at most its own, mixing its blur and the level before's
+  (its second backdrop, `EffectOp.Backdrop2`) by how far into the band, so
+  a pixel shows each blur once and a pixel between two levels mixes
+  them, exactly at any opacity. A level of a square element covers only
+  its band (`blurWanted`), and so reads less. The levels share one read
+  of what is under them (`EffectOp.Shared`), each blurring it by its own,
+  in texels of its own blur's size, its second too. Bounding the levels
+  to the element, so that
   they read no unblurred content around it, measured worse against a blur
   varying per pixel than leaving them reading it: the repeated edge biases
   more than what is around. A level may tone what it shows (`blurTone`:
@@ -2991,12 +2995,19 @@ either.
   channel, as textures hold it, which the shaders sample bilinearly
   (`sampleBackdrop`, `BackdropImage.Sample`). The renderer multiplies an
   effect's color by its shape's coverage, the clip and the opacity.
+  An effect may read a second backdrop, blurred by another amount, of
+  the same texels (`EffectOp.Backdrop2`, `Scene.Backdrops`; `backdrop2`,
+  `backdrop2Tex` or `uBackdrop2` in the shaders, `BackdropImage.Second`
+  on the CPU), and effects in a row may share their backdrop
+  (`EffectOp.Shared`): each reads the frame as it was before the first of
+  them drew, blurred by its own, so that a renderer reads and blurs them
+  all at once (`scene.BackdropGroup`, `gpu.Batch.Group`).
   Effects carry the code compiled ahead of time from what their renderer
   makes of their shader, with its SHA-256: renderers compile the source
   when it no longer matches, as when their head or tail changed since,
   and an effect's tests fail then. Package `ui` gives packages a hook,
   `Element.Material` (a `ui.Material`, built with its element when it is
-  a `MaterialBuilder`), and `Painter.Effect`, which only this module's
+  a `MaterialBuilder`), and `Painter.Effect` (and `Painter.EffectOp`, with what an effect op holds beyond), which only this module's
   packages can call, since effects are internal types. An effect's shape
   has continuous corners where its op does, which the renderer covers as
   such, while the effect gets positive radii and takes them as circular.
@@ -3275,7 +3286,11 @@ either.
   small pipelines (`down` and `blur`, scissored to the texels they
   compute, reading them with `Load`, `read` or `texelFetch`) into textures
   as large as the frame's largest backdrop, and goes on with the pass, the
-  backdrop bound for the effect. An image drawn blurred goes through the
+  backdrop bound for the effect. Effects sharing a backdrop are a group
+  (`Batch.Group`): the renderer breaks its pass once, at the first of them,
+  computing all their backdrops into textures of their own, as many as
+  the largest group needs (`Builder.BackdropGroup`), and binds each
+  effect's, and its second, as it draws. An image drawn blurred goes through the
   same two pipelines before the frame's pass, which the builder asks for
   as it meets it (`Builder.BlurredImage`), from the image's texture into
   one of the frame's own, in BGRA8 whatever the frame's format, reading
@@ -3539,7 +3554,8 @@ either.
   readied (`EffectPixels.Begin`) before its pixels, and one reading its
   backdrop reads pixels other bands draw, so an area is drawn up to each
   effect, its backdrop computed (`backdrop.read`, its rows and columns on
-  several cores too), then from the effect to the next, in bands of 16
+  several cores too; for effects sharing one, from a copy of the frame
+  taken before the first of them, `backdropSource`), then from the effect to the next, in bands of 16
   rows, as effects are costly and often short. The glass plugin's
   `BenchmarkGlass`, a window of 1360×720 pixels with four panes, takes
   6.4 ms drawn whole on an M5, 22 ms on one core. A whole frame

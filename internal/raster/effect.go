@@ -8,14 +8,18 @@ import (
 )
 
 // drawer is what draw keeps from scene to scene: the renderers of the
-// bands and the team drawing them, the backdrop of an effect, and the
-// effects' CPU twins.
+// bands and the team drawing them, the backdrop of an effect and its
+// second (bd2, scene.EffectOp.Backdrop2), the frame
+// as it was before a group of effects sharing a backdrop drew (snap, of
+// the group from op snapGroup), and the effects' CPU twins.
 type drawer struct {
-	rs    []renderer
-	bands team
-	job   bandJob
-	bd    backdrop
-	fx    map[*scene.Effect]scene.EffectPixels
+	rs        []renderer
+	bands     team
+	job       bandJob
+	bd, bd2   backdrop
+	snap      Image
+	snapGroup int
+	fx        map[*scene.Effect]scene.EffectPixels
 	// blurred holds, by op, the images of the scene drawn that blur theirs
 	// (blurImages).
 	blurred []*blurredImage

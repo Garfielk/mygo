@@ -320,10 +320,11 @@ type Renderer struct {
 
 	// The passes computing the backdrops of effects: their shaders and
 	// constants, grab, which holds the area of the frame read, and
-	// backdrop, the textures they draw into, the second only along rows.
+	// backdrop, the textures they draw into: one for each backdrop of a
+	// group (gpu.Batch.Group), and the last only along rows.
 	passVS, downPS, blurPS, passCB uintptr
 	grab                           texture
-	backdrop                       [2]texture
+	backdrop                       []texture
 	// effects are the pixel shaders of the effects drawn, made as first
 	// drawn.
 	effects map[*scene.Effect]*effectShader
@@ -702,11 +703,18 @@ func (r *Renderer) Release() {
 		free(&t.tex)
 	}
 	r.blurred = nil
-	for _, t := range []*texture{&r.grab, &r.backdrop[0], &r.backdrop[1], &r.blurTmp[0], &r.blurTmp[1], &r.stops} {
+	for _, t := range []*texture{&r.grab, &r.blurTmp[0], &r.blurTmp[1], &r.stops} {
 		free(&t.rtv)
 		free(&t.srv)
 		free(&t.tex)
 	}
+	for i := range r.backdrop {
+		t := &r.backdrop[i]
+		free(&t.rtv)
+		free(&t.srv)
+		free(&t.tex)
+	}
+	r.backdrop = nil
 	// The target goes first: a window has one at most, which another
 	// renderer of it then makes.
 	for _, p := range []*uintptr{&r.visual, &r.target, &r.dcomp, &r.rtv, &r.swapChain2, &r.swapChain, &r.instBuf, &r.cbuf, &r.passCB, &r.samp, &r.raster, &r.holeBlend, &r.blend, &r.layout,
@@ -1030,6 +1038,8 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, rtv uintptr, part *
 	call(ctx, ctxIASetPrimitiveTopology, topologyTriangleStrip)
 	r.bindState(s, 0)
 	bound, ps, blend, shaders := uintptr(0), r.ps, r.blend, false
+	// The group of backdrops read last.
+	read := [2]int{-1, -1}
 	for _, bt := range b.Batches {
 		if bt.Count == 0 {
 			continue
@@ -1041,9 +1051,20 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, rtv uintptr, part *
 			}
 		}
 		if bt.Backdrop != 0 {
-			// The effect shows what is drawn so far.
-			r.readBackdrop(b.Backdrops[bt.Backdrop-1])
-			r.bindState(s, r.backdrop[0].srv)
+			// The effect shows what is drawn so far, before the first of
+			// its group, whose backdrops it reads then.
+			if bt.Group != read {
+				read = bt.Group
+				for k := read[0]; k < read[1]; k++ {
+					r.readBackdrop(b.Backdrops[k], k-read[0])
+				}
+			}
+			r.bindState(s, r.backdropOf(bt))
+			second := uintptr(0)
+			if bt.Backdrop2 != 0 {
+				second = r.backdrop[bt.Backdrop2-1-bt.Group[0]].srv
+			}
+			call(ctx, ctxPSSetShaderResources, 11, 1, uintptr(unsafe.Pointer(&second)))
 			bound, ps, blend = 0, r.ps, r.blend
 		}
 		if want != ps {
@@ -1115,7 +1136,7 @@ func (r *Renderer) bindShader(b gpu.Batch) error {
 	if b.Backdrop != 0 {
 		// A shader reading its backdrop reads it as its image
 		// BackdropImage.
-		views[gpu.BackdropImage] = r.backdrop[0].srv
+		views[gpu.BackdropImage] = r.backdropOf(b)
 	}
 	call(r.ctx, ctxPSSetShaderResources, 6, 4, uintptr(unsafe.Pointer(&views[0])))
 	return nil
@@ -1250,14 +1271,18 @@ func (r *Renderer) blurImage(img *scene.Image, bk scene.Backdrop) uintptr {
 	return out.srv
 }
 
+// backdropOf returns the view of the backdrop of batch b.
+func (r *Renderer) backdropOf(b gpu.Batch) uintptr { return r.backdrop[b.Backdrop-1-b.Group[0]].srv }
+
 // readBackdrop computes the backdrop bk of what the target drawn holds,
-// into r.backdrop[0]: it copies the area into grab, averages its squares
-// and blurs them.
-func (r *Renderer) readBackdrop(bk scene.Backdrop) {
+// into r.backdrop[i]: it copies the area into grab, averages its squares
+// and blurs them, along rows into the last of r.backdrop.
+func (r *Renderer) readBackdrop(bk scene.Backdrop, i int) {
 	ctx := r.ctx
 	// No texture drawn into may be bound for reading.
 	var none [5]uintptr
 	call(ctx, ctxPSSetShaderResources, 0, 5, uintptr(unsafe.Pointer(&none[0])))
+	call(ctx, ctxPSSetShaderResources, 11, 1, uintptr(unsafe.Pointer(&none[0])))
 	var back uintptr
 	call(r.drawing, viewGetResource, uintptr(unsafe.Pointer(&back)))
 	from := box{Left: uint32(bk.Area.Min.X), Top: uint32(bk.Area.Min.Y), Right: uint32(bk.Area.Max.X), Bottom: uint32(bk.Area.Max.Y), Back: 1}
@@ -1268,10 +1293,11 @@ func (r *Renderer) readBackdrop(bk scene.Backdrop) {
 	call(ctx, ctxVSSetShader, r.passVS, 0, 0)
 	call(ctx, ctxPSSetConstantBuffers, 1, 1, uintptr(unsafe.Pointer(&r.passCB)))
 	w, h := bk.Size()
-	r.pass(r.downPS, r.grab.srv, &r.backdrop[0], w, h, gpu.DownPass(bk, [2]int32{int32(bk.Area.Min.X), int32(bk.Area.Min.Y)}))
+	r.pass(r.downPS, r.grab.srv, &r.backdrop[i], w, h, gpu.DownPass(bk, [2]int32{int32(bk.Area.Min.X), int32(bk.Area.Min.Y)}))
 	if bk.Radius > 0 {
-		r.pass(r.blurPS, r.backdrop[0].srv, &r.backdrop[1], w, h, gpu.BlurPass(bk, [2]int32{1, 0}))
-		r.pass(r.blurPS, r.backdrop[1].srv, &r.backdrop[0], w, h, gpu.BlurPass(bk, [2]int32{0, 1}))
+		rows := &r.backdrop[len(r.backdrop)-1]
+		r.pass(r.blurPS, r.backdrop[i].srv, rows, w, h, gpu.BlurPass(bk, [2]int32{1, 0}))
+		r.pass(r.blurPS, rows.srv, &r.backdrop[i], w, h, gpu.BlurPass(bk, [2]int32{0, 1}))
 	}
 }
 
@@ -1291,10 +1317,11 @@ func (r *Renderer) pass(ps, src uintptr, dst *texture, w, h int, p gpu.Pass) {
 	call(ctx, ctxPSSetShaderResources, 4, 1, uintptr(unsafe.Pointer(&none)))
 }
 
-// fitBackdrop makes the textures of backdrops as large as the scene built
-// needs, and the texture the area read is copied to.
+// fitBackdrop makes the textures of backdrops as large and as many as the
+// scene built needs, and the texture the area read is copied to.
 func (r *Renderer) fitBackdrop(b *gpu.Builder) error {
 	w, h := b.BackdropSize()
+	n := b.BackdropGroup() + 1
 	aw, ah := 0, 0
 	for _, bk := range b.Backdrops {
 		aw, ah = max(aw, bk.Area.Dx()), max(ah, bk.Area.Dy())
@@ -1306,10 +1333,21 @@ func (r *Renderer) fitBackdrop(b *gpu.Builder) error {
 			return err
 		}
 	}
-	if w > r.backdrop[0].w || h > r.backdrop[0].h {
-		w, h = max(w+w/4, r.backdrop[0].w), max(h+h/4, r.backdrop[0].h)
-		for i := range r.backdrop {
-			if err := r.newTarget(&r.backdrop[i], w, h, true); err != nil {
+	if w == 0 || len(r.backdrop) >= n && w <= r.backdrop[0].w && h <= r.backdrop[0].h {
+		return nil
+	}
+	if len(r.backdrop) == 0 || w > r.backdrop[0].w || h > r.backdrop[0].h {
+		w, h = w+w/4, h+h/4
+	}
+	if len(r.backdrop) > 0 {
+		w, h = max(w, r.backdrop[0].w), max(h, r.backdrop[0].h)
+	}
+	for len(r.backdrop) < n {
+		r.backdrop = append(r.backdrop, texture{})
+	}
+	for i := range r.backdrop {
+		if t := &r.backdrop[i]; t.tex == 0 || t.w != w || t.h != h {
+			if err := r.newTarget(t, w, h, true); err != nil {
 				return err
 			}
 		}

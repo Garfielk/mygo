@@ -44,14 +44,17 @@ float3 sampleBackdrop(texture2d<float> t, Effect e, float2 q) {
 
 fragment PSOut effect_ps(VSOut v [[stage_in]], const device Inst *insts [[buffer(0)]],
 						 constant float4 &globals [[buffer(1)]], texture2d<float> backdrop [[texture(3)]],
-						 texture2d<float> clipTex [[texture(4)]], sampler samp [[sampler(0)]]) {
+						 texture2d<float> clipTex [[texture(4)]], texture2d<float> backdrop2 [[texture(10)]],
+						 sampler samp [[sampler(0)]]) {
 	Inst i = insts[v.inst];
 	Frame fr = frameOf(v, i);
 	// The shape's corners are continuous where its radii are negative,
 	// which the effect takes as circular.
 	Effect e = {i.rect, abs(i.radii), i.inner,	  i.color,			i.color2,	  i.border,
 				i.grad, i.uv,		  i.params.z, globals.z > 0.5f, i.transform0, i.transform1, i.transform2};
-	float4 res = effect(v.p, e, backdrop) * (localCoverage(v.p, i.rect, i.radii, i.transform0.w, fr) *
+	// An effect's second backdrop (scene.EffectOp.Backdrop2) has the
+	// texels of the first: area and down read both.
+	float4 res = effect(v.p, e, backdrop, backdrop2) * (localCoverage(v.p, i.rect, i.radii, i.transform0.w, fr) *
 											 clipCoverage(v, i, clipTex, samp) * i.params.w);
 	return PSOut{res, res.aaaa};
 }

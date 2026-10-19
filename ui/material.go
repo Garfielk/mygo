@@ -61,12 +61,26 @@ func (p *Painter) EffectColor(c Color) (srgb, wide [4]float32) {
 // effect's own, in device pixels (Scale), and blur the standard deviation
 // of the blur of its backdrop, in device pixels, for an effect reading one.
 func (p *Painter) Effect(fx *scene.Effect, r Rect, radii [4]float32, blur float32, params [5][4]float32) {
+	p.effect(fx, r, radii, scene.EffectOp{Effect: fx, Blur: blur, Params: params})
+}
+
+// EffectOp paints an effect as Effect does, with what op says beyond
+// what Effect takes, as whether it reads the backdrop of the effect before
+// it (scene.EffectOp.Shared) and a second backdrop (Backdrop2): the levels
+// of a blur that varies across its element share one read of what is
+// under them, as the glass plugin's do. r is in DIPs, the rest of op as
+// Effect takes it.
+func (p *Painter) EffectOp(r Rect, radii [4]float32, op scene.EffectOp) {
+	p.effect(op.Effect, r, radii, op)
+}
+
+func (p *Painter) effect(fx *scene.Effect, r Rect, radii [4]float32, op scene.EffectOp) {
 	if fx == nil || r.W <= 0 || r.H <= 0 {
 		return
 	}
 	p.add(scene.Op{Kind: scene.OpEffect, Rect: p.snap(r), Radii: p.radii(radii), Continuous: continuousCorners,
 		Start: int32(len(p.s.Effects)), Opacity: p.opacity})
-	p.s.Effects = append(p.s.Effects, scene.EffectOp{Effect: fx, Blur: blur, Params: params})
+	p.s.Effects = append(p.s.Effects, op)
 }
 
 // ShaderInput is what the effect of a shader of package ui/shader reads:

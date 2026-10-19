@@ -139,12 +139,13 @@ type Renderer struct {
 	// The passes computing the backdrops of effects: down and blur are
 	// their programs, with their uniforms' locations, drawn with passVAO;
 	// grab holds the area of the frame read, and backdrop the textures
-	// they draw into, through backdropFB, the second only along rows.
+	// they draw into, through backdropFB: one for each backdrop of a group
+	// (gpu.Batch.Group), and the last only along rows.
 	down, blur passProgram
 	passVAO    uint32
 	grab       texture
-	backdrop   [2]texture
-	backdropFB [2]uint32
+	backdrop   []texture
+	backdropFB []uint32
 	// header is what the shaders start with; effects are the programs of
 	// the effects drawn, made as first drawn.
 	header  string
@@ -327,6 +328,7 @@ func (r *Renderer) effectProgram(e *scene.Effect) *effectProgram {
 	p.uSize = glGetUniformLocation(p.program, "uSize")
 	glUniform1i(glGetUniformLocation(p.program, "uMask"), 0)
 	glUniform1i(glGetUniformLocation(p.program, "uBackdrop"), 3)
+	glUniform1i(glGetUniformLocation(p.program, "uBackdrop2"), backdrop2Unit)
 	glUniform1i(glGetUniformLocation(p.program, "uClipMask"), 4)
 	if e.Shader != nil {
 		// A shader's uniforms come from binding point 0, its images from
@@ -365,7 +367,7 @@ func (r *Renderer) bindShader(b gpu.Batch) {
 		if i == gpu.BackdropImage && b.Backdrop != 0 {
 			// A shader reading its backdrop reads it as this image, its
 			// rows going down.
-			glBindTexture(glTexture2D, r.backdrop[0].tex)
+			glBindTexture(glTexture2D, r.backdropOf(b))
 			continue
 		}
 		glBindTexture(glTexture2D, or(uint32(t), r.empty))
@@ -788,6 +790,8 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, part *gpu.Scissor) 
 	glBufferData(glArrayBuffer, len(b.Instances)*gpu.InstanceSize, unsafe.Pointer(&b.Instances[0]), glStreamDraw)
 	r.bindState(s)
 	bound, program, hole := uintptr(r.empty), r.program, false
+	// The group of backdrops read last.
+	read := [2]int{-1, -1}
 	for _, bt := range b.Batches {
 		sc := bt.Scissor
 		sc.Left, sc.Top = max(sc.Left, 0), max(sc.Top, 0)
@@ -807,13 +811,24 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, part *gpu.Scissor) 
 			want = p.program
 		}
 		if bt.Backdrop != 0 {
-			// The effect shows what is drawn so far.
-			r.readBackdrop(uint32(fb), s.Height, b.Backdrops[bt.Backdrop-1])
-			glBindFramebuffer(glFramebuffer, uint32(fb))
-			glViewport(0, 0, int32(s.Width), int32(s.Height))
+			// The effect shows what is drawn so far, before the first of
+			// its group, whose backdrops it reads then.
+			if bt.Group != read {
+				read = bt.Group
+				for k := read[0]; k < read[1]; k++ {
+					r.readBackdrop(uint32(fb), s.Height, b.Backdrops[k], k-read[0])
+				}
+				glBindFramebuffer(glFramebuffer, uint32(fb))
+				glViewport(0, 0, int32(s.Width), int32(s.Height))
+			}
 			r.bindState(s)
+			glActiveTexture(glTexture0 + backdrop2Unit)
+			glBindTexture(glTexture2D, r.empty)
+			if bt.Backdrop2 != 0 {
+				glBindTexture(glTexture2D, r.backdrop[bt.Backdrop2-1-bt.Group[0]].tex)
+			}
 			glActiveTexture(glTexture0 + 3)
-			glBindTexture(glTexture2D, r.backdrop[0].tex)
+			glBindTexture(glTexture2D, r.backdropOf(bt))
 			glActiveTexture(glTexture0 + 2)
 			bound, program, hole = uintptr(r.empty), r.program, false
 		}
@@ -852,7 +867,7 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, part *gpu.Scissor) 
 	// expects it.
 	glDisable(glScissorTest)
 	glDisable(glBlend)
-	for unit := range stopsUnit + 1 {
+	for unit := range backdrop2Unit + 1 {
 		glActiveTexture(glTexture0 + uint32(unit))
 		glBindTexture(glTexture2D, 0)
 	}
@@ -864,8 +879,12 @@ func (r *Renderer) drawBuilt(s *scene.Scene, b *gpu.Builder, part *gpu.Scissor) 
 	return nil
 }
 
-// stopsUnit is the texture unit of the stops of gradients (uStops).
-const stopsUnit = 9
+// stopsUnit is the texture unit of the stops of gradients (uStops), and
+// backdrop2Unit that of an effect's second backdrop (uBackdrop2).
+const (
+	stopsUnit     = 9
+	backdrop2Unit = 10
+)
 
 // syncStops uploads the stops of the gradients b built into r.stops,
 // which r.stopsTex then is, or 0 for none.
@@ -1040,10 +1059,14 @@ func (r *Renderer) blendFunc(hole bool) {
 	}
 }
 
+// backdropOf returns the texture of the backdrop of batch b.
+func (r *Renderer) backdropOf(b gpu.Batch) uint32 { return r.backdrop[b.Backdrop-1-b.Group[0]].tex }
+
 // readBackdrop computes the backdrop bk of what the framebuffer fb holds,
-// a frame height pixels high, into r.backdrop[0]: it copies the area into
-// grab, whose rows go up as GL's, averages its squares and blurs them.
-func (r *Renderer) readBackdrop(fb uint32, height int, bk scene.Backdrop) {
+// a frame height pixels high, into r.backdrop[i]: it copies the area into
+// grab, whose rows go up as GL's, averages its squares and blurs them,
+// along rows into the last of r.backdrop.
+func (r *Renderer) readBackdrop(fb uint32, height int, bk scene.Backdrop, i int) {
 	w, h := bk.Size()
 	glDisable(glBlend)
 	glBindFramebuffer(glFramebuffer, fb)
@@ -1053,14 +1076,15 @@ func (r *Renderer) readBackdrop(fb uint32, height int, bk scene.Backdrop) {
 	glBindVertexArray(r.passVAO)
 	// Rows go up in grab: the frame's row y is its row Max.Y-1-y.
 	r.down.set(gpu.DownPass(bk, [2]int32{int32(bk.Area.Min.X), int32(bk.Area.Max.Y - 1)}))
-	r.pass(0, w, h)
+	r.pass(i, w, h)
 	if bk.Radius > 0 {
+		rows := len(r.backdrop) - 1
 		r.blur.set(gpu.BlurPass(bk, [2]int32{1, 0}))
-		glBindTexture(glTexture2D, r.backdrop[0].tex)
-		r.pass(1, w, h)
+		glBindTexture(glTexture2D, r.backdrop[i].tex)
+		r.pass(rows, w, h)
 		r.blur.set(gpu.BlurPass(bk, [2]int32{0, 1}))
-		glBindTexture(glTexture2D, r.backdrop[1].tex)
-		r.pass(0, w, h)
+		glBindTexture(glTexture2D, r.backdrop[rows].tex)
+		r.pass(i, w, h)
 	}
 }
 
@@ -1086,10 +1110,11 @@ func (r *Renderer) pass(i, w, h int) {
 	glDrawArraysInstanced(glTriangleStrip, 0, 4, 1)
 }
 
-// fitBackdrop makes the textures of backdrops as large as the scene built
-// needs, and the texture the area read is copied to.
+// fitBackdrop makes the textures of backdrops as large and as many as the
+// scene built needs, and the texture the area read is copied to.
 func (r *Renderer) fitBackdrop(b *gpu.Builder) error {
 	w, h := b.BackdropSize()
+	n := b.BackdropGroup() + 1
 	aw, ah := 0, 0
 	for _, bk := range b.Backdrops {
 		aw, ah = max(aw, bk.Area.Dx()), max(ah, bk.Area.Dy())
@@ -1103,12 +1128,28 @@ func (r *Renderer) fitBackdrop(b *gpu.Builder) error {
 		}
 		r.grab = texture{tex: newTexture(glRGBA8, glRGBA, aw, ah, nil, 0), w: aw, h: ah}
 	}
-	if w <= r.backdrop[0].w && h <= r.backdrop[0].h {
+	if w == 0 || len(r.backdrop) >= n && w <= r.backdrop[0].w && h <= r.backdrop[0].h {
 		return nil
 	}
-	w, h = min(max(w+w/4, r.backdrop[0].w), r.maxSize), min(max(h+h/4, r.backdrop[0].h), r.maxSize)
+	if len(r.backdrop) > 0 {
+		w, h = max(w, r.backdrop[0].w), max(h, r.backdrop[0].h)
+		if w > r.backdrop[0].w || h > r.backdrop[0].h {
+			// Somewhat larger, so that a pane growing does not make them
+			// again every frame.
+			w, h = w+w/4, h+h/4
+		}
+	} else {
+		w, h = w+w/4, h+h/4
+	}
+	w, h = min(w, r.maxSize), min(h, r.maxSize)
+	for len(r.backdrop) < n {
+		r.backdrop, r.backdropFB = append(r.backdrop, texture{}), append(r.backdropFB, 0)
+	}
 	for i := range r.backdrop {
 		t := &r.backdrop[i]
+		if t.tex != 0 && t.w == w && t.h == h {
+			continue
+		}
 		if t.tex != 0 {
 			glDeleteTextures(1, &t.tex)
 		}
@@ -1141,7 +1182,7 @@ func (r *Renderer) forget() {
 	r.program, r.vao, r.buf, r.empty, r.ubo = 0, 0, 0, 0, 0
 	r.down, r.blur, r.passVAO = passProgram{}, passProgram{}, 0
 	clear(r.effects)
-	r.grab, r.backdrop, r.backdropFB = texture{}, [2]texture{}, [2]uint32{}
+	r.grab, r.backdrop, r.backdropFB = texture{}, nil, nil
 	r.mask, r.color = texture{}, texture{}
 	clear(r.images)
 	for _, t := range r.canvases {
@@ -1192,9 +1233,14 @@ func (r *Renderer) Release() {
 		r.blurTmp[i].release()
 	}
 	r.blurred, r.used = nil, 0
-	for _, tex := range []*uint32{&r.mask.tex, &r.color.tex, &r.empty, &r.grab.tex, &r.backdrop[0].tex, &r.backdrop[1].tex, &r.stops.tex} {
+	for _, tex := range []*uint32{&r.mask.tex, &r.color.tex, &r.empty, &r.grab.tex, &r.stops.tex} {
 		if *tex != 0 {
 			glDeleteTextures(1, tex)
+		}
+	}
+	for i := range r.backdrop {
+		if r.backdrop[i].tex != 0 {
+			glDeleteTextures(1, &r.backdrop[i].tex)
 		}
 	}
 	for i := range r.backdropFB {

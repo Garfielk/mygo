@@ -45,7 +45,7 @@ float3 glassTone(float3 c, float4 tone) {
 	return clamp(t + (c - l) * k, 0.0f, 1.0f);
 }
 
-float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
+float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2) {
 	float t = max(-sdRoundRect(p, e.rect, e.radii), 0.0f);
 	float bezel = e.p0.x;
 	float rimWidth = e.p0.w;

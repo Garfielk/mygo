@@ -120,6 +120,7 @@ func (d *drawer) draw(dst *Image, s *scene.Scene, area image.Rectangle, bounds [
 	defer func() { d.blurred = nil }()
 	// px draws operation from, an effect over the backdrop b.
 	from, px, b := 0, scene.EffectPixels(nil), (*scene.BackdropImage)(nil)
+	d.snapGroup = -1
 	for i := range s.Ops {
 		op := &s.Ops[i]
 		if op.Kind != scene.OpEffect || int(op.Start) >= len(s.Effects) || !bounds[i].Overlaps(area) {
@@ -133,8 +134,15 @@ func (d *drawer) draw(dst *Image, s *scene.Scene, area image.Rectangle, bounds [
 		d.drawOps(dst, s, area, bounds, from, i, px, b)
 		b = nil
 		if fx.Effect.Backdrop {
-			d.bd.read(dst, s.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, dst.W, dst.H))
-			d.bd.img.Transform = op.Transform
+			src := d.backdropSource(dst, s, i)
+			bk, bk2 := s.Backdrops(op, dst.W, dst.H)
+			d.bd.read(src, bk)
+			d.bd.img.Transform, d.bd.img.Second = op.Transform, nil
+			if fx.Backdrop2 {
+				d.bd2.read(src, bk2)
+				d.bd2.img.Transform = op.Transform
+				d.bd.img.Second = &d.bd2.img
+			}
 			b = &d.bd.img
 		}
 		rect := op.Rect
@@ -146,6 +154,41 @@ func (d *drawer) draw(dst *Image, s *scene.Scene, area image.Rectangle, bounds [
 		from, px = i, next
 	}
 	d.drawOps(dst, s, area, bounds, from, len(s.Ops), px, b)
+}
+
+// backdropSource returns the image op i of s, an effect reading its
+// backdrop, reads it from: dst, what is drawn so far, or, for an effect
+// sharing its backdrop with others (scene.EffectOp.Shared), a copy of
+// what dst held before the first of them drew, taken at the first of
+// them drawn, over all their backdrops.
+func (d *drawer) backdropSource(dst *Image, s *scene.Scene, i int) *Image {
+	g := scene.BackdropGroup(s, i)
+	end := i + 1
+	for end < len(s.Ops) && scene.BackdropGroup(s, end) == g {
+		end++
+	}
+	if g == i && end == i+1 {
+		return dst
+	}
+	if d.snapGroup == g {
+		return &d.snap
+	}
+	d.snapGroup = g
+	if d.snap.W != dst.W || d.snap.H != dst.H || d.snap.Stride != dst.Stride {
+		d.snap = Image{W: dst.W, H: dst.H, Stride: dst.Stride, Pix: make([]byte, len(dst.Pix))}
+	}
+	var area image.Rectangle
+	for j := g; j < end; j++ {
+		op := &s.Ops[j]
+		bk, _ := s.Backdrops(op, dst.W, dst.H)
+		area = area.Union(bk.Area)
+	}
+	area = area.Intersect(image.Rect(0, 0, dst.W, dst.H))
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		o := y*dst.Stride + 4*area.Min.X
+		copy(d.snap.Pix[o:o+4*area.Dx()], dst.Pix[o:])
+	}
+	return &d.snap
 }
 
 // drawOps draws operations from to to of s within area, as draw does,

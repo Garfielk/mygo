@@ -4,6 +4,9 @@
 // "// effect", draws its instances with it.
 
 uniform sampler2D uBackdrop;
+// An effect's second backdrop (scene.EffectOp.Backdrop2), whose texels
+// are those of the first: area and down read both.
+uniform sampler2D uBackdrop2;
 
 // What an effect reads of its instance.
 struct Effect {

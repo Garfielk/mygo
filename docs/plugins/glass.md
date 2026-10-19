@@ -143,17 +143,20 @@ it shows the blurred content through. `Start` and `End` place the
 gradient's colors along it, as everywhere; leaving `End` 0 puts both at
 `Start`, a hard edge.
 
-A blur that varies is drawn in steps, each blurring what the step before
-drew a little more, shown where the blur wanted is more than the step's
-own, mixed with the next between them: one step for each doubling of the
-blur from two pixels, five for 12 DIPs on a Retina display. A pixel
-between two steps shows both blurs mixed, as Core Animation's variable
-blur does between the levels of its pyramid, and as the stacked
-`backdrop-filter` layers of a progressive blur on the web do. Where the
-gradient is opaque at an edge of the element in the middle of the window,
-rather than at the window's edge, the blur differs a little within a few
-pixels of that edge from one blurring each pixel by its own amount, as
-each step reads what is around the element unblurred.
+A blur that varies is drawn in steps, one for each doubling of the blur
+from two pixels, five for 12 DIPs on a Retina display: each step blurs
+what is under the element by its own amount and shows only where the
+blur wanted lies between the step's and the one before's, mixing the
+two blurs by how far between them it is. A pixel between two steps shows
+both blurs mixed, as Core Animation's variable blur does between the
+levels of its pyramid. The steps read what is under the element once,
+together, and each blurs only its own band of it, at the resolution its
+blur needs: the whole costs about what one blur of the element does, a
+few times over. Where the gradient is opaque at an edge of the element
+in the middle of the window, rather than at the window's edge, the blur
+differs a little within a few pixels of that edge from one blurring each
+pixel by its own amount, as each step reads what is around the element
+unblurred.
 
 ## How it looks like macOS
 
@@ -183,9 +186,10 @@ anything under it does, as content scrolling under a bar. When a window
 draws on the CPU, without a GPU, as [Rendering](../ui/rendering.md)
 describes, a change under a pane redraws the pane and what its blur
 reaches around it. A
-progressive blur does this for each of its steps, where each shows: on
-the CPU, a strip of 1360×176 pixels blurred by 24 takes 9 ms on an M5
-fading, 1.7 evenly, and on the GPU a few small passes for each step.
+progressive blur does this for each of its steps, over its band: on the
+CPU, a strip of 1360×176 pixels blurred by 24 takes 1.7 ms on an M5
+evenly and about four times as long fading, and on the GPU a few small
+passes for each step, all before the first of them draws.
 
 Panes are rounded rectangles. They do not merge into each other when
 close, as AppKit's `NSGlassEffectContainerView` does.

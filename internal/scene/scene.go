@@ -382,6 +382,22 @@ func (s *Scene) BackdropOf(r Rect, blur float32, w, h int) Backdrop {
 	return BackdropOf(r, blur, w, h)
 }
 
+// Backdrops returns the backdrops op, an effect reading its backdrop, reads
+// in s, a frame of w×h pixels: blurred by its Blur, and, for one reading
+// a second (EffectOp.Backdrop2), blurred by its Blur2, with the same
+// texels (BackdropsOf), ending at the edge of the part Drawn says.
+func (s *Scene) Backdrops(op *Op, w, h int) (Backdrop, Backdrop) {
+	fx := &s.Effects[op.Start]
+	if s.Drawn != (image.Point{}) {
+		w, h = min(w, s.Drawn.X), min(h, s.Drawn.Y)
+	}
+	r := op.Transform.Bounds(op.Rect)
+	if !fx.Backdrop2 {
+		return BackdropOf(r, fx.Blur, w, h), Backdrop{}
+	}
+	return BackdropsOf(r, fx.Blur, fx.Blur2, w, h)
+}
+
 // EachCanvas calls fn with the canvases the scene draws anew or shows,
 // each once, those a canvas shows before it.
 func (s *Scene) EachCanvas(fn func(*Image)) {

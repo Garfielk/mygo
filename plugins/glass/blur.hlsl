@@ -1,17 +1,22 @@
 // A level of the blur's effect in HLSL (see scene.Effect), as blur.metal
 // is in Metal Shading Language and blur.go draws it on the CPU.
 
-float4 blurAt(int2 p, int2 size) { return backdropTex.Load(int3(clamp(p, int2(0, 0), size - 1), 0)); }
+float4 blurAt(int second, int2 p, int2 size) {
+	int3 q = int3(clamp(p, int2(0, 0), size - 1), 0);
+	return second == 1 ? backdrop2Tex.Load(q) : backdropTex.Load(q);
+}
 
-float4 blurSample(Effect e, float2 q) {
+// blurSample returns the backdrop at q with its alpha, or the second
+// backdrop, of the same texels.
+float4 blurSample(int second, Effect e, float2 q) {
 	q = framePoint(e, q);
 	float2 u = (q - e.area.xy) / e.down - 0.5;
 	float2 f = floor(u);
 	float2 w = u - f;
 	int2 p = int2(f);
 	int2 size = int2(e.area.zw);
-	float4 top = blurAt(p, size) * (1 - w.x) + blurAt(p + int2(1, 0), size) * w.x;
-	float4 bot = blurAt(p + int2(0, 1), size) * (1 - w.x) + blurAt(p + int2(1, 1), size) * w.x;
+	float4 top = blurAt(second, p, size) * (1 - w.x) + blurAt(second, p + int2(1, 0), size) * w.x;
+	float4 bot = blurAt(second, p + int2(0, 1), size) * (1 - w.x) + blurAt(second, p + int2(1, 1), size) * w.x;
 	return top * (1 - w.y) + bot * w.y;
 }
 
@@ -23,11 +28,15 @@ float4 effect(float2 p, Effect e) {
 		t = saturate(((p.x - e.p0.x) * d.x + (p.y - e.p0.y) * d.y) / max(l, 0.0001));
 	}
 	float blur = e.p1.x * (1 - t) + e.p1.y * t;
-	float w = saturate((blur - e.p1.z) / (e.p1.w - e.p1.z));
-	if (w <= 0) {
+	if (blur <= e.p1.z || e.p2.w > 0.5 && blur > e.p1.w) {
 		return float4(0, 0, 0, 0);
 	}
-	float4 c = blurSample(e, p);
+	float w = saturate((blur - e.p1.z) / (e.p1.w - e.p1.z));
+	float4 c = blurSample(0, e, p);
+	if (e.p3.w > 0.5) {
+		c = lerp(blurSample(1, e, p), c, w);
+		w = 1;
+	}
 	float lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
 	c.rgb = clamp(lum + (c.rgb - lum) * (1 + e.p2.x) + e.p2.y * c.a, 0, c.a);
 	c += (float4(e.p3.rgb, 1) - c) * e.p2.z;

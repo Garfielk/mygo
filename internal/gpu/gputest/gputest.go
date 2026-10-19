@@ -195,7 +195,7 @@ func Scene() *scene.Scene {
 	// Effects over them: reading their backdrop blurred at a quarter of
 	// the size, over each other at the same size, unblurred, clipped and
 	// half transparent at full size, past the frame's edge at half the
-	// size; and one reading none.
+	// size; one reading none; and two sharing one.
 	effect := func(e *scene.Effect, r scene.Rect, radii [4]float32, blur, shift float32, tint scene.Color, opacity float32) {
 		fx := scene.EffectOp{Effect: e, Blur: blur}
 		fx.Params[0] = [4]float32{shift}
@@ -214,6 +214,12 @@ func Scene() *scene.Scene {
 	add(scene.Op{Kind: scene.OpPopClip})
 	effect(LensEffect, scene.Rect{X: 284, Y: 494, W: 50, H: 50}, r4(14), 6, 2, white, 0)
 	effect(TintEffect, scene.Rect{X: 250, Y: 420, W: 30, H: 30}, r4(8), 0, 0, scene.Color{R: 220, G: 40, B: 40, A: 160}, 0)
+	// Two effects sharing a backdrop (scene.EffectOp.Shared), the second
+	// over the first, which it does not show: it reads what was under
+	// both, blurred by its own.
+	effect(LensEffect, scene.Rect{X: 196, Y: 474, W: 60, H: 26}, r4(6), 2, 0, scene.Color{R: 37, G: 99, B: 235, A: 255}, 0)
+	effect(LensEffect, scene.Rect{X: 226, Y: 480, W: 50, H: 34}, r4(10), 5, 1, scene.Color{R: 255, G: 255, B: 255, A: 40}, 0)
+	s.Effects[len(s.Effects)-1].Shared = true
 
 	// Inner shadows: a hairline blurred along the edge of a dark card,
 	// offset and spread, without blur, and with no hole left.

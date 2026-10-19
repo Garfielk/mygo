@@ -12,7 +12,7 @@ var (
 		Name:     "lens",
 		Backdrop: true,
 		Metal: scene.EffectCode{Source: `
-float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
+float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2) {
 	float d = max(8.0f + sdRoundRect(p, e.rect, e.radii), 0.0f) * e.p0.x;
 	float3 c = sampleBackdrop(backdrop, e, p + float2(d, 0.0f));
 	c += (e.p1.rgb - c) * e.p1.a;
@@ -37,7 +37,7 @@ vec4 effect(vec2 p, Effect e) {
 	TintEffect = &scene.Effect{
 		Name: "tint",
 		Metal: scene.EffectCode{Source: `
-float4 effect(float2 p, Effect e, texture2d<float> backdrop) {
+float4 effect(float2 p, Effect e, texture2d<float> backdrop, texture2d<float> backdrop2) {
 	return float4(e.p1.rgb * e.p1.a, e.p1.a);
 }`},
 		HLSL: scene.EffectCode{Source: `

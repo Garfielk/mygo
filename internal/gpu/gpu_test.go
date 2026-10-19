@@ -801,3 +801,39 @@ func TestCornerSplitPaysForItsDrawCalls(t *testing.T) {
 		}
 	}
 }
+
+// TestBackdropGroups checks that effects sharing a backdrop are a group of
+// batches, whose backdrops, second ones too, are the group's, and that an
+// effect sharing none starts its own.
+func TestBackdropGroups(t *testing.T) {
+	s := &scene.Scene{Width: 200, Height: 100}
+	s.Ops = []scene.Op{{Kind: scene.OpFill, Rect: scene.Rect{W: 200, H: 100}, Color: scene.Color{R: 255, A: 255}}}
+	for i, fx := range []scene.EffectOp{
+		{Effect: gputest.LensEffect, Blur: 4, Backdrop2: true},
+		{Effect: gputest.LensEffect, Blur: 8, Backdrop2: true, Blur2: 4, Shared: true},
+		{Effect: gputest.LensEffect, Blur: 16, Shared: true},
+		{Effect: gputest.LensEffect, Blur: 2},
+	} {
+		s.Ops = append(s.Ops, scene.Op{Kind: scene.OpEffect, Rect: scene.Rect{X: float32(i * 40), W: 40, H: 100}, Start: int32(i)})
+		s.Effects = append(s.Effects, fx)
+	}
+	var b Builder
+	b.Build(s, func(*scene.Image) uintptr { return 0 })
+	var got [][4]int
+	for _, bt := range b.Batches {
+		if bt.Backdrop != 0 {
+			got = append(got, [4]int{bt.Backdrop, bt.Backdrop2, bt.Group[0], bt.Group[1]})
+		}
+	}
+	want := [][4]int{{1, 2, 0, 5}, {3, 4, 0, 5}, {5, 0, 0, 5}, {6, 0, 5, 6}}
+	if !slices.Equal(got, want) {
+		t.Errorf("backdrop, second, group: %v, want %v", got, want)
+	}
+	if n := b.BackdropGroup(); n != 5 {
+		t.Errorf("BackdropGroup %d, want 5", n)
+	}
+	// An effect and its second backdrop have the same texels.
+	if a, c := b.Backdrops[2], b.Backdrops[3]; a.Area != c.Area || a.Down != c.Down || c.Sigma >= a.Sigma {
+		t.Errorf("the backdrops of an effect blurring by 8 and by 4: %+v, %+v", a, c)
+	}
+}

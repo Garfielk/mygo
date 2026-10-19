@@ -388,9 +388,10 @@ type formatState struct {
 	// opaquePipe the cores of opaque fills (gpu.Batch.Opaque), without blending.
 	holePipe, opaquePipe id
 	// downPipe and blurPipe draw the passes computing the backdrops of
-	// effects, into the textures of backdrop, the second only along rows.
+	// effects, into the textures of backdrop: one for each backdrop of a
+	// group (gpu.Batch.Group), and the last only along rows.
 	downPipe, blurPipe id
-	backdrop           [2]texture
+	backdrop           []texture
 	// clear is a texel of the frame's color, cleared to it, which a frame
 	// drawn in part copies over what it redraws (see clearArea).
 	clear id
@@ -1227,6 +1228,8 @@ func (r *Renderer) drawBuilt(cb id, s *scene.Scene, target id, d *drawState, par
 	// changed since the last.
 	bindInstances(enc, instBuf)
 	st := passState{pipe: r.cur.pipeline, image: r.empty, scissor: noScissor}
+	// The group of backdrops read last.
+	read := [2]int{-1, -1}
 	if part != nil && !part.Empty() {
 		r.clearArea(enc, *part)
 		st.pipe, st.scissor = r.cur.downPipe, *part
@@ -1242,15 +1245,27 @@ func (r *Renderer) drawBuilt(cb id, s *scene.Scene, target id, d *drawState, par
 			continue
 		}
 		if b.Backdrop != 0 {
-			// The effect shows what is drawn so far.
-			send(enc, "endEncoding")
-			r.readBackdrop(cb, target, d.b.Backdrops[b.Backdrop-1])
-			if enc, err = r.begin(cb, target, loadActionLoad, s, &d.b); err != nil {
-				return err
+			// The effect shows what is drawn so far, before the first of
+			// its group, whose backdrops it reads then, in one break of
+			// the pass.
+			if b.Group != read {
+				read = b.Group
+				send(enc, "endEncoding")
+				for k := read[0]; k < read[1]; k++ {
+					r.readBackdrop(cb, target, d.b.Backdrops[k], k-read[0])
+				}
+				if enc, err = r.begin(cb, target, loadActionLoad, s, &d.b); err != nil {
+					return err
+				}
+				bindInstances(enc, instBuf)
+				st = passState{pipe: r.cur.pipeline, image: r.empty, scissor: noScissor}
 			}
-			msg2(enc, selSetFragmentTexture, r.cur.backdrop[0].tex, 3)
-			bindInstances(enc, instBuf)
-			st = passState{pipe: r.cur.pipeline, image: r.empty, scissor: noScissor}
+			msg2(enc, selSetFragmentTexture, r.backdropOf(b), 3)
+			second := r.empty
+			if b.Backdrop2 != 0 {
+				second = r.cur.backdrop[b.Backdrop2-1-b.Group[0]].tex
+			}
+			msg2(enc, selSetFragmentTexture, second, 10)
 		}
 		if want != st.pipe {
 			st.pipe = want
@@ -1314,7 +1329,7 @@ func (r *Renderer) bindShader(enc id, b gpu.Batch) {
 	for i, t := range b.Textures {
 		if i == gpu.BackdropImage && b.Backdrop != 0 {
 			// A shader reading its backdrop reads it as this image.
-			t = uintptr(r.cur.backdrop[0].tex)
+			t = uintptr(r.backdropOf(b))
 		}
 		send(enc, "setFragmentTexture:atIndex:", or(id(t), r.empty), uintptr(5+i))
 	}
@@ -1479,20 +1494,24 @@ func (r *Renderer) blurImage(cb id, img *scene.Image, bk scene.Backdrop) uintptr
 	return uintptr(out.tex)
 }
 
+// backdropOf returns the texture of the backdrop of batch b.
+func (r *Renderer) backdropOf(b gpu.Batch) id { return r.cur.backdrop[b.Backdrop-1-b.Group[0]].tex }
+
 // readBackdrop encodes the passes computing the backdrop bk of what
-// target holds, into r.cur.backdrop[0].
-func (r *Renderer) readBackdrop(cb, target id, bk scene.Backdrop) {
+// target holds, into r.cur.backdrop[i], along rows into the last of them.
+func (r *Renderer) readBackdrop(cb, target id, bk scene.Backdrop, i int) {
 	f := r.cur
 	w, h := bk.Size()
 	p := gpu.DownPass(bk, [2]int32{})
-	r.pass(cb, f.downPipe, target, f.backdrop[0].tex, w, h, &p)
+	r.pass(cb, f.downPipe, target, f.backdrop[i].tex, w, h, &p)
 	if bk.Radius == 0 {
 		return
 	}
+	rows := f.backdrop[len(f.backdrop)-1].tex
 	p = gpu.BlurPass(bk, [2]int32{1, 0})
-	r.pass(cb, f.blurPipe, f.backdrop[0].tex, f.backdrop[1].tex, w, h, &p)
+	r.pass(cb, f.blurPipe, f.backdrop[i].tex, rows, w, h, &p)
 	p = gpu.BlurPass(bk, [2]int32{0, 1})
-	r.pass(cb, f.blurPipe, f.backdrop[1].tex, f.backdrop[0].tex, w, h, &p)
+	r.pass(cb, f.blurPipe, rows, f.backdrop[i].tex, w, h, &p)
 }
 
 // pass encodes drawing the w×h texels at the start of dst with pipe,
@@ -1512,19 +1531,31 @@ func (r *Renderer) pass(cb, pipe, src, dst id, w, h int, p *gpu.Pass) {
 	send(enc, "endEncoding")
 }
 
-// fitBackdrop makes the textures of backdrops as large as the scene built
-// needs.
+// fitBackdrop makes the textures of backdrops as large and as many as the
+// scene built needs.
 func (r *Renderer) fitBackdrop(b *gpu.Builder) error {
 	f := r.cur
 	w, h := b.BackdropSize()
-	if w == 0 || f.backdrop[0].w >= w && f.backdrop[0].h >= h {
+	n := b.BackdropGroup() + 1
+	if w == 0 || len(f.backdrop) >= n && f.backdrop[0].w >= w && f.backdrop[0].h >= h {
 		return nil
 	}
-	// Somewhat larger, so that a pane growing does not make them again
-	// every frame.
-	w, h = max(w+w/4, f.backdrop[0].w), max(h+h/4, f.backdrop[0].h)
+	if len(f.backdrop) == 0 || w > f.backdrop[0].w || h > f.backdrop[0].h {
+		// Somewhat larger, so that a pane growing does not make them
+		// again every frame.
+		w, h = w+w/4, h+h/4
+	}
+	if len(f.backdrop) > 0 {
+		w, h = max(w, f.backdrop[0].w), max(h, f.backdrop[0].h)
+	}
+	for len(f.backdrop) < n {
+		f.backdrop = append(f.backdrop, texture{})
+	}
 	for i := range f.backdrop {
 		t := &f.backdrop[i]
+		if t.tex != 0 && t.w == w && t.h == h {
+			continue
+		}
 		release(&t.tex)
 		if t.tex = r.newTexture(w, h, f.format, usageRenderTarget|usageShaderRead, nil, 0); t.tex == 0 {
 			t.w, t.h = 0, 0
@@ -1823,8 +1854,8 @@ func (r *Renderer) releaseTextures() {
 	for i := range r.formats {
 		for j := range r.formats[i].backdrop {
 			release(&r.formats[i].backdrop[j].tex)
-			r.formats[i].backdrop[j] = texture{}
 		}
+		r.formats[i].backdrop = nil
 	}
 	r.b.Release()
 	r.b.Classes = true
