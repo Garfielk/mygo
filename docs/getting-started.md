@@ -231,7 +231,10 @@ The apps run where they are, but to ship them to users, sign them: see
     Einstein ring of stars, in three passes with bloom), `examples/chat-glow`
     (an assistant lit as Apple Intelligence: the window's edges glowing
     while it thinks, borders of conic gradients blurred, and a glowing
-    field, shimmering text and an orb, shaders), `examples/timeline`
+    field, shimmering text and an orb, shaders), `examples/frosted-folder`
+    (a folder of frosted glass opening, its pane tipping toward you in
+    perspective as the glass comes into focus: a progressive blur and a
+    frost, drawn by one shader in one pass), `examples/timeline`
     (an intro on one playhead: a card sliding in, its title and rows
     following it, with play, pause, reverse and restart) and
     `examples/gallery` (a tour of the
