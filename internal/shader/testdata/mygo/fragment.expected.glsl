@@ -5,9 +5,10 @@ uniform vec2 U3;
 uniform vec3 U4;
 uniform vec3 U5;
 uniform vec4 U6;
-uniform uint U7;
-uniform int U8;
-uniform vec4 U9[4];
+uniform vec3 U7;
+uniform uint U8;
+uniform int U9;
+uniform vec4 U10[4];
 uniform sampler2D T0;
 uniform sampler2D T1;
 uniform sampler2D T2;
@@ -59,13 +60,13 @@ vec4 F20(in vec4 l0, in vec2 l1) {
 	float l2 = float(0);
 	uint l5 = 0u;
 	l2 = 0.0;
-	for (int l3 = 0; l3 < U8; l3++) {
-		l2 = (l2) + ((((U9)[l3]).z) / ((1.0) + (distance(l1, ((U9)[l3]).xy))));
+	for (int l3 = 0; l3 < U9; l3++) {
+		l2 = (l2) + ((((U10)[l3]).z) / ((1.0) + (distance(l1, ((U10)[l3]).xy))));
 	}
-	for (uint l4 = 0u; l4 < U7; l4 += 2u) {
+	for (uint l4 = 0u; l4 < U8; l4 += 2u) {
 		l2 = (l2) + (1.0000000000e-01);
 	}
-	l5 = F0((((uvec3(uint(int((l0).x)))).z) * (2654435769u)) ^ (F0((uint(int((l0).y))) ^ (U7))));
+	l5 = F0((((uvec3(uint(int((l0).x)))).z) * (2654435769u)) ^ (F0((uint(int((l0).y))) ^ (U8))));
 	return (((F10((l1) * (F2()))) * (float((l5) % (255u)))) / (255.0)) * (l2);
 }
 

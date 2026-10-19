@@ -34,9 +34,10 @@ struct Uniforms {
 	float3 U4;
 	float3 U5;
 	float4 U6;
-	uint U7;
-	int U8;
-	array<float4, 4> U9;
+	float3 U7;
+	uint U8;
+	int U9;
+	array<float4, 4> U10;
 };
 
 uint F0(constant Uniforms& uniforms, texture2d<float> T0, texture2d<float> T1, texture2d<float> T2, texture2d<float> T3, uint l0);
@@ -80,13 +81,13 @@ float4 F20(constant Uniforms& uniforms, texture2d<float> T0, texture2d<float> T1
 	float l2 = float(0);
 	uint l5 = 0u;
 	l2 = 0.0;
-	for (int l3 = 0; l3 < uniforms.U8; l3++) {
-		l2 = (l2) + ((((uniforms.U9)[l3]).z) / ((1.0) + (distance(l1, ((uniforms.U9)[l3]).xy))));
+	for (int l3 = 0; l3 < uniforms.U9; l3++) {
+		l2 = (l2) + ((((uniforms.U10)[l3]).z) / ((1.0) + (distance(l1, ((uniforms.U10)[l3]).xy))));
 	}
-	for (uint l4 = 0u; l4 < uniforms.U7; l4 += 2u) {
+	for (uint l4 = 0u; l4 < uniforms.U8; l4 += 2u) {
 		l2 = (l2) + (1.0000000000e-01);
 	}
-	l5 = F0(uniforms, T0, T1, T2, T3, (((uint3(static_cast<uint>(static_cast<int>((l0).x)))).z) * (2654435769u)) ^ (F0(uniforms, T0, T1, T2, T3, (static_cast<uint>(static_cast<int>((l0).y))) ^ (uniforms.U7))));
+	l5 = F0(uniforms, T0, T1, T2, T3, (((uint3(static_cast<uint>(static_cast<int>((l0).x)))).z) * (2654435769u)) ^ (F0(uniforms, T0, T1, T2, T3, (static_cast<uint>(static_cast<int>((l0).y))) ^ (uniforms.U8))));
 	return (((F10(uniforms, T0, T1, T2, T3, (l1) * (F2(uniforms, T0, T1, T2, T3)))) * (static_cast<float>((l5) % (255u)))) / (255.0)) * (l2);
 }
 

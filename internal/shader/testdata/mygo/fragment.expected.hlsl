@@ -31,9 +31,10 @@ cbuffer Uniforms : register(b2) {
 	float3 U4 : packoffset(c5);
 	float3 U5 : packoffset(c6);
 	float4 U6 : packoffset(c7);
-	uint U7 : packoffset(c8);
-	int U8 : packoffset(c8.y);
-	float4 U9[4] : packoffset(c9);
+	float3 U7 : packoffset(c8);
+	uint U8 : packoffset(c8.w);
+	int U9 : packoffset(c9);
+	float4 U10[4] : packoffset(c10);
 }
 
 Texture2D T0 : register(t6);
@@ -82,13 +83,13 @@ float4 F20(in float4 l0, in float2 l1) {
 	float l2 = 0.0;
 	uint l5 = 0u;
 	l2 = 0.0;
-	for (int l3 = 0; l3 < U8; l3++) {
-		l2 = (l2) + ((((U9)[l3]).z) / ((1.0) + (distance(l1, ((U9)[l3]).xy))));
+	for (int l3 = 0; l3 < U9; l3++) {
+		l2 = (l2) + ((((U10)[l3]).z) / ((1.0) + (distance(l1, ((U10)[l3]).xy))));
 	}
-	for (uint l4 = 0u; l4 < U7; l4 += 2u) {
+	for (uint l4 = 0u; l4 < U8; l4 += 2u) {
 		l2 = (l2) + (1.0000000000e-01);
 	}
-	l5 = F0(((((uint3)(uint(int((l0).x)))).z) * (2654435769u)) ^ (F0((uint(int((l0).y))) ^ (U7))));
+	l5 = F0(((((uint3)(uint(int((l0).x)))).z) * (2654435769u)) ^ (F0((uint(int((l0).y))) ^ (U8))));
 	return (((F10((l1) * (F2()))) * (float((l5) % (255u)))) / (255.0)) * (l2);
 }
 
