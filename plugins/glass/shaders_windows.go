@@ -6,7 +6,7 @@ package glass
 
 // hlslSum is the SHA-256 of what hlslBytecode was compiled from: glass.hlsl
 // within the renderer's head and tail.
-const hlslSum = "992d26b77e140c1bd43df2fe7fc69a9fdb3005053635275f37a4487d9b298d5f"
+const hlslSum = "30ffe553b42f3b3f3387fde3ad608625106d75c21b93e66e0cf8666c551cfe7c"
 
 var hlslBytecode = []byte{
 	0x44, 0x58, 0x42, 0x43, 0x60, 0x97, 0x5d, 0x3e, 0x0d, 0xb3, 0x70, 0x00, 0x9d, 0x70, 0x7f, 0xa2,
@@ -1937,7 +1937,7 @@ var hlslBytecode = []byte{
 
 // blurHLSLSum is the SHA-256 of what blurBytecode was compiled from: blur.hlsl
 // within the renderer's head and tail.
-const blurHLSLSum = "493ae964a10ffbb22dd39c6bcf4b295de4893c667006d19ab0c4ff72c1e0f1b9"
+const blurHLSLSum = "9bce4ced9ccb9b66b15103bb3bf86f2ec72e6700be7d1c8e1af485aee8bad272"
 
 var blurBytecode = []byte{
 	0x44, 0x58, 0x42, 0x43, 0x6d, 0xf9, 0x82, 0x60, 0x56, 0xe7, 0xec, 0xb9, 0x53, 0x66, 0xa6, 0x9c,
