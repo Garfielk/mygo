@@ -390,3 +390,35 @@ func TestContentHiddenWindowButtons(t *testing.T) {
 		t.Errorf("TitleBar = %+v, want none", bar)
 	}
 }
+
+// The view tells the backend where it shows the maximize button, and that
+// it shows none once the button goes.
+func TestContentMaximizeButton(t *testing.T) {
+	shown := true
+	view := func(c *ui.Context) {
+		ui.Row(c).Fill().AlignItems(ui.Start).Children(func() {
+			ui.Spacer(c)
+			if shown {
+				ui.ButtonBase(c.Key("max")).Size(40, 30).Label("Maximize").MaximizeButton()
+			}
+		})
+	}
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, TitleBarStyle: TitleBarHidden, HideWindowButtons: true, Content: ui.View(view)})
+	t.Cleanup(w.Destroy)
+	wins := fb.Windows()
+	fw := wins[len(wins)-1]
+	s := fw.FakeSurface()
+	onMain(func() {
+		w.native = &contentTitleBarWindow{Window: w.native, t: t}
+		s.Frame()
+	})
+	if want := (platform.RectF{X: 260, Y: 0, W: 40, H: 30}); fw.MaximizeButton != want {
+		t.Errorf("maximize button at %+v, want %+v", fw.MaximizeButton, want)
+	}
+	onMain(func() { shown = false })
+	w.Invalidate()
+	onMain(func() { s.Frame() })
+	if fw.MaximizeButton != (platform.RectF{}) {
+		t.Errorf("maximize button at %+v after it went", fw.MaximizeButton)
+	}
+}
