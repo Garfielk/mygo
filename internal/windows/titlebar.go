@@ -136,8 +136,12 @@ func (c *captionBar) forget() {
 }
 
 // shownButtons returns the buttons of the window, left to right: close alone
-// when it can be neither minimized nor maximized, as Windows does.
+// when it can be neither minimized nor maximized, as Windows does, and none
+// when the page draws its own (HideWindowButtons).
 func (w *window) shownButtons() []captionButton {
+	if w.opts.HideWindowButtons {
+		return nil
+	}
 	if !w.hasStyle(wsMinimizeBox) && !w.hasStyle(wsMaximizeBox) {
 		return []captionButton{buttonClose}
 	}
@@ -157,7 +161,7 @@ func (w *window) buttonEnabled(b captionButton) bool {
 func (w *window) titleBarHeight() int { return cmp.Or(w.opts.TitleBarHeight, captionHeight) }
 
 func (w *window) TitleBar() platform.TitleBar {
-	if w.caption == nil || w.fullScreen {
+	if w.caption == nil || w.fullScreen || len(w.shownButtons()) == 0 {
 		return platform.TitleBar{}
 	}
 	return platform.TitleBar{Height: w.titleBarHeight(), Right: captionButtonWidth * len(w.shownButtons())}
@@ -197,7 +201,7 @@ func (c *captionBar) layout() {
 	height := toPx(w.titleBarHeight(), dpi)
 	x := r.Right - width
 	show := uintptr(swpShowWindow)
-	if w.fullScreen {
+	if w.fullScreen || width == 0 {
 		show = swpHideWindow
 	}
 	// HWND_TOP (0): above the webview's window, created after them.

@@ -368,3 +368,25 @@ func TestContentMenuRightToLeft(t *testing.T) {
 		t.Errorf("the menus shown are %q, want %q", got, want)
 	}
 }
+
+// HideWindowButtons leaves native UI the whole title bar: the controls it
+// draws itself take no room of the system's.
+func TestContentHiddenWindowButtons(t *testing.T) {
+	var bar ui.TitleBar
+	view := func(c *ui.Context) { bar = c.TitleBar() }
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, TitleBarStyle: TitleBarHidden, HideWindowButtons: true, Content: ui.View(view)})
+	t.Cleanup(w.Destroy)
+	wins := fb.Windows()
+	fw := wins[len(wins)-1]
+	if !fw.Opts.HideWindowButtons {
+		t.Error("the backend was not told to hide the window buttons")
+	}
+	s := fw.FakeSurface()
+	onMain(func() {
+		w.native = &contentTitleBarWindow{Window: w.native, t: t}
+		s.Frame()
+	})
+	if bar != (ui.TitleBar{}) {
+		t.Errorf("TitleBar = %+v, want none", bar)
+	}
+}

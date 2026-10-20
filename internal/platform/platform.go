@@ -333,7 +333,10 @@ type WindowOptions struct {
 	TitleBarStyle string
 	// TitleBarHeight is the height of a hidden title bar in DIPs (Linux,
 	// Windows); 0 is the backend's own.
-	TitleBarHeight       int
+	TitleBarHeight int
+	// HideWindowButtons hides the window controls of a hidden title bar,
+	// which the page draws itself: TitleBar is then zero.
+	HideWindowButtons    bool
 	TrafficLightPosition *Point
 	Vibrancy             string
 	Opacity              float64

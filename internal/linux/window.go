@@ -209,7 +209,7 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	// its natural size.
 	gtkWidgetSetSizeRequest(w.box, 1, 1)
 	gtkContainerAdd(w.win, w.box)
-	if w.hiddenTitleBar() {
+	if w.hiddenTitleBar() && !o.HideWindowButtons {
 		w.newControls()
 	}
 	if o.Surface {
