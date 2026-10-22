@@ -72,17 +72,155 @@ func TestLayoutCacheKeepsFrequentlyUsedText(t *testing.T) {
 	}
 }
 
-func TestLayoutCacheSkipsOversizedParagraph(t *testing.T) {
+// fillToLivePressure lays fresh paragraphs until the live cache has less
+// than the ordinary budget's room left, as a busy window's texts would.
+func fillToLivePressure(s *System) {
+	for i := 0; s.layoutBytes < maxLiveLayoutBytes-maxLayoutBytes; i++ {
+		s.Layout(Params{Text: fmt.Sprintf("paragraph %04d: %s", i, strings.Repeat("word ", 200))})
+	}
+}
+
+// The live cache may hold an oversized paragraph beside ordinary labels,
+// but never by evicting a label a recent frame used: under pressure the
+// paragraph stays uncached, and reshaping it is cheaper than losing them.
+func TestLayoutCacheOversizedParagraphKeepsLabels(t *testing.T) {
 	s := newSystem()
 	s.eng = &stubEngine{}
-	p := Params{Text: "a small label"}
-	l := s.Layout(p)
-	large := s.Layout(Params{Text: strings.Repeat("x", maxLayoutBytes/32)})
-	if len(large.Runes) != maxLayoutBytes/32 || len(large.Lines) == 0 {
+	fillToLivePressure(s)
+	labels, keep := len(s.layouts), s.Layout(Params{Text: "a small label"})
+	p := Params{Text: strings.Repeat("x", maxLayoutBytes/64)}
+	made := s.LayoutsMade()
+	if large := s.Layout(p); len(large.Runes) == 0 || len(large.Lines) == 0 {
 		t.Fatal("oversized text did not lay out")
 	}
-	if len(s.layouts) != 1 || s.Layout(p) != l {
-		t.Fatal("an oversized paragraph displaced the ordinary labels")
+	if s.Layout(p); s.LayoutsMade()-made != 2 || len(s.layouts) != labels+1 {
+		t.Fatal("an oversized paragraph displaced ordinary labels")
+	}
+	if s.Layout(Params{Text: "a small label"}) != keep {
+		t.Fatal("an oversized paragraph evicted a label")
+	}
+}
+
+func TestLayoutCacheReusesOversizedParagraph(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	p := Params{Text: strings.Repeat("x", maxLayoutBytes/32)}
+	first := s.Layout(p)
+	if n := layoutBytes(&cached{layout: *first}); n <= maxLayoutBytes {
+		t.Fatalf("fixture is not oversized: %d bytes", n)
+	}
+	s.EndFrame()
+	if s.Layout(p) != first {
+		t.Fatal("an unchanged oversized paragraph was reshaped")
+	}
+}
+
+// Several oversized paragraphs a frame keeps drawing share the live room,
+// and leave with the rest when the fonts change.
+func TestLayoutCacheKeepsSeveralOversizedParagraphs(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	p0 := Params{Text: strings.Repeat("x", maxLayoutBytes/64)}
+	p1 := Params{Text: strings.Repeat("y", maxLayoutBytes/64)}
+	a, b := s.Layout(p0), s.Layout(p1)
+	if n := layoutBytes(&cached{layout: *a}); n <= maxLayoutBytes {
+		t.Fatalf("fixture is not oversized: %d bytes", n)
+	}
+	s.EndFrame()
+	if s.Layout(p0) != a || s.Layout(p1) != b {
+		t.Fatal("the live cache kept only one oversized paragraph")
+	}
+	s.clearLayouts()
+	if len(s.layouts) != 0 || s.layoutBytes != 0 {
+		t.Fatal("clearing the cache kept an oversized paragraph")
+	}
+	if s.Layout(p0) == a {
+		t.Fatal("a cleared cache served its old layout")
+	}
+}
+
+// A dragged split pane lays the same oversized paragraph out at width
+// after width: every width keeps its own layout, within the budget.
+func TestLayoutCacheKeepsOversizedParagraphAcrossWidths(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	p0 := Params{Text: strings.Repeat("x", maxLayoutBytes/64), Width: 700}
+	p1 := p0
+	p1.Width = 701
+	a, b := s.Layout(p0), s.Layout(p1)
+	if a == b {
+		t.Fatal("two widths shared one layout")
+	}
+	if n := layoutBytes(&cached{layout: *a}); n <= maxLayoutBytes {
+		t.Fatalf("fixture is not oversized: %d bytes", n)
+	}
+	s.EndFrame()
+	if s.Layout(p0) != a || s.Layout(p1) != b {
+		t.Fatal("an oversized paragraph was reshaped at a width it kept")
+	}
+	if s.layoutBytes > maxLiveLayoutBytes {
+		t.Fatal("one paragraph at two widths exceeded the live budget")
+	}
+}
+
+// Once no recent frame uses the labels, the next oversized paragraph takes
+// their room: it is admitted exactly then, not before.
+func TestLayoutCacheAdmitsOversizedOnStaleRoom(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	fillToLivePressure(s)
+	p := Params{Text: strings.Repeat("x", maxLayoutBytes/64)}
+	s.Layout(p)
+	made := s.LayoutsMade()
+	if s.Layout(p); s.LayoutsMade()-made != 1 {
+		t.Fatal("a fresh cache admitted an oversized paragraph")
+	}
+	for range liveLayoutFrames {
+		s.EndFrame()
+	}
+	first := s.Layout(p)
+	if s.Layout(p) != first || s.LayoutsMade()-made != 2 {
+		t.Fatal("an oversized paragraph did not take stale room")
+	}
+}
+
+// An oversized paragraph unused for a few frames leaves the cache, as the
+// ordinary document does, and lays out anew.
+func TestLayoutCacheForgetsUnusedOversizedParagraph(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	p := Params{Text: strings.Repeat("x", maxLayoutBytes/64)}
+	s.Layout(p)
+	if s.layoutBytes <= maxLayoutBytes {
+		t.Fatal("fixture is not oversized")
+	}
+	for range liveLayoutFrames {
+		s.EndFrame()
+	}
+	if s.layoutBytes != 0 || len(s.layouts) != 0 {
+		t.Fatal("an unused oversized paragraph stayed cached")
+	}
+	made := s.LayoutsMade()
+	s.Layout(p)
+	if s.LayoutsMade()-made != 1 {
+		t.Fatal("a forgotten oversized paragraph was not reshaped")
+	}
+}
+
+// A paragraph beyond the whole live budget never enters the cache: holding
+// it would take evicting every layout of every window, every frame.
+func TestLayoutCacheSkipsParagraphBeyondLiveBudget(t *testing.T) {
+	s := newSystem()
+	s.eng = &stubEngine{}
+	p := Params{Text: strings.Repeat("x", maxLayoutBytes/16)}
+	l := s.Layout(p)
+	if n := layoutBytes(&cached{layout: *l}); n <= maxLiveLayoutBytes {
+		t.Fatalf("fixture takes %d bytes, within the live budget", n)
+	}
+	made := s.LayoutsMade()
+	s.Layout(p)
+	if s.LayoutsMade()-made != 1 || len(s.layouts) != 0 {
+		t.Fatal("a paragraph beyond the live budget was cached")
 	}
 }
 

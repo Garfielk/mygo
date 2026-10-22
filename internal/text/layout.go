@@ -658,15 +658,24 @@ func (s *System) Layout(p Params) *Layout {
 	p.Style.Lang = strings.Clone(p.Style.Lang)
 	c := s.layout(p)
 	c.bytes = layoutBytes(c)
-	// A large paragraph still lays out correctly; keeping it would evict
-	// all the ordinary labels and lines of other windows.
 	if c.bytes <= maxLayoutBytes {
 		for s.oldest != nil && (s.overLayoutBudget(c.bytes) || len(s.layouts) >= maxLayouts) {
 			s.removeLayout(s.oldest)
 		}
-		s.layouts[p] = c
-		s.layoutBytes += c.bytes
-		s.useLayout(c)
+		s.admitLayout(p, c)
+	} else if c.bytes <= maxLiveLayoutBytes {
+		// An oversized paragraph joins the live cache only on the room of
+		// layouts no recent frame used: never by evicting the ordinary
+		// labels of other windows. A paragraph beyond the whole live budget
+		// stays uncached; reshaping it every frame is cheaper than holding
+		// what evicting it would take.
+		for s.oldest != nil && s.frame-s.oldest.used >= liveLayoutFrames &&
+			(s.overLayoutBudget(c.bytes) || len(s.layouts) >= maxLayouts) {
+			s.removeLayout(s.oldest)
+		}
+		if !s.overLayoutBudget(c.bytes) && len(s.layouts) < maxLayouts {
+			s.admitLayout(p, c)
+		}
 	}
 	return &c.layout
 }
@@ -743,6 +752,12 @@ func (s *System) removeLayout(c *cached) {
 	s.unlinkLayout(c)
 	delete(s.layouts, c.layout.Params)
 	s.layoutBytes -= c.bytes
+}
+
+func (s *System) admitLayout(p Params, c *cached) {
+	s.layouts[p] = c
+	s.layoutBytes += c.bytes
+	s.useLayout(c)
 }
 
 func (s *System) clearLayouts() {
