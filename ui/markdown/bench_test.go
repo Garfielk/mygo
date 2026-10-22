@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -44,6 +45,20 @@ func BenchmarkViewStream(b *testing.B) {
 		if n > len(src) {
 			n = 16
 		}
+		tt.Frame()
+	}
+}
+
+// BenchmarkViewLinksSteady draws frames of a link-heavy document that
+// changes nothing, in a window of 700 by 600, where every glyph of every
+// link is painted through the inline tree.
+func BenchmarkViewLinksSteady(b *testing.B) {
+	src := strings.Repeat("中文 mixed punctuation。 https://example.com/path\n", 1700)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Scroll(c).Fill().Children(func() { View(c, src, nil) })
+	}, 700, 600)
+	b.ReportAllocs()
+	for b.Loop() {
 		tt.Frame()
 	}
 }

@@ -710,9 +710,12 @@ func (p *Painter) textBackgrounds(l *text.Layout, x, y float32, ts textStyle, sp
 	if l == nil || ts.background.A == 0 && sp == nil {
 		return
 	}
+	// The inline tree does not change while this paints: one scan of it
+	// answers for every line and glyph below.
+	inlineTransformed := p.inlineTransforms()
 	for li := range l.Lines {
 		line := &l.Lines[li]
-		if !p.transform.Set && !p.inlineTransforms() && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
+		if !p.transform.Set && !inlineTransformed && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
 			continue
 		}
 		if ts.background.A > 0 && line.Width > 0 {
@@ -731,24 +734,27 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
 	}
 	sys := p.rt.text
 	s := p.scale
+	// The inline tree does not change while this paints: one scan of it
+	// answers for every line and glyph below.
+	inlineTransformed := p.inlineTransforms()
 	deco := decoration{underline: ts.underline, wavy: ts.wavy, strike: ts.strike, color: ts.decoColor, thick: ts.decoThick}
 	shade := text.ShadeOf(color.R, color.G, color.B)
 	start := int32(len(p.s.Glyphs))
 	var run *glyphRun
-	if sys.JoinsGlyphs() && !p.inlineTransforms() {
+	if sys.JoinsGlyphs() && !inlineTransformed {
 		// The engine's, whose buffers each text reuses.
 		run = &p.rt.glyphRun
 		run.ids, run.pens, run.glyphs = run.ids[:0], run.pens[:0], run.glyphs[:0]
 	}
 	for li := range l.Lines {
 		line := &l.Lines[li]
-		if !p.transform.Set && !p.inlineTransforms() && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
+		if !p.transform.Set && !inlineTransformed && (y+line.Y > p.clip.Y+p.clip.H || y+line.Y+line.Height < p.clip.Y) {
 			continue
 		}
 		baseline := sys.Baseline((y + line.Baseline) * s)
 		for _, g := range line.Glyphs {
 			pen := (x + g.X) * s
-			if g.Object || !p.transform.Set && !p.inlineTransforms() && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
+			if g.Object || !p.transform.Set && !inlineTransformed && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
 				continue
 			}
 			ix := float32(math.Floor(float64(pen)))
@@ -758,7 +764,7 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
 					glyphShade = text.ShadeOf(glyphColor.R, glyphColor.G, glyphColor.B)
 				}
 			}
-			gi := sys.Glyph(g.Font, g.ID, s, pen, glyphShade, p.opaque && !p.inlineTransforms())
+			gi := sys.Glyph(g.Font, g.ID, s, pen, glyphShade, p.opaque && !inlineTransformed)
 			if !gi.OK {
 				continue
 			}
@@ -782,7 +788,7 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
 			sp.lines(p, l, li, x, y, color, deco)
 		}
 		if deco.underline || deco.strike {
-			p.decorations(l, li, 0, len(line.Glyphs), x, y, deco, color)
+			p.decorations(l, li, 0, len(line.Glyphs), x, y, deco, color, inlineTransformed)
 		}
 	}
 	if end := int32(len(p.s.Glyphs)); end > start {
@@ -848,9 +854,10 @@ type decoration struct {
 // decorations draws the lines of d along glyphs [i, j) of line li of l,
 // laid out from (x, y) in DIPs, where the system's text stack places
 // underlines and strikethroughs, in the color of d or c. Wavy underlines
-// follow the underline, at least a pixel thick.
-func (p *Painter) decorations(l *text.Layout, li, i, j int, x, y float32, d decoration, c Color) {
-	if !p.inlineTransforms() {
+// follow the underline, at least a pixel thick. inlineTransformed is the
+// painter's answer to inlineTransforms, computed once by the caller.
+func (p *Painter) decorations(l *text.Layout, li, i, j int, x, y float32, d decoration, c Color, inlineTransformed bool) {
+	if !inlineTransformed {
 		p.decorationRun(l, li, i, j, x, y, d, c)
 		return
 	}
