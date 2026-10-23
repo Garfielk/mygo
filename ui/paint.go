@@ -392,9 +392,27 @@ func (p *Painter) borders(w [4]float32) [4]float32 {
 	return w
 }
 
+// snapBox snaps the box of an op to device pixels. When the painter's
+// transform only translates and the box has a border, the box is snapped
+// where the translation lands it in the window, and the returned
+// transform undoes that translation, which add stamps back: the border
+// then sits on whole device pixels, as browsers pixel-snap static
+// borders, however fractional the translates of its ancestors are. Any
+// other transform, or a box with no border, snaps in its own
+// coordinates, keeping the subpixel edges that scaled, turned and
+// animating boxes show.
+func (p *Painter) snapBox(r Rect, bordered bool) (scene.Rect, scene.Affine) {
+	if dx, dy, ok := p.transform.Translation(); bordered && ok {
+		return p.snap(Rect{X: r.X + dx, Y: r.Y + dy, W: r.W, H: r.H}),
+			scene.Translation(-dx*p.scale, -dy*p.scale)
+	}
+	return p.snap(r), scene.Affine{}
+}
+
 // fill paints a rounded rectangle with a solid border of bw DIPs.
 func (p *Painter) fill(r Rect, radius [4]float32, bg Color, bw float32, bc Color) {
-	op := scene.Op{Kind: scene.OpFill, Rect: p.snap(r), Radii: p.radii(radius), Continuous: continuousCorners, Color: bg.scene(), BorderColor: bc.scene(), Opacity: p.opacity}
+	rect, tr := p.snapBox(r, bw > 0)
+	op := scene.Op{Kind: scene.OpFill, Rect: rect, Transform: tr, Radii: p.radii(radius), Continuous: continuousCorners, Color: bg.scene(), BorderColor: bc.scene(), Opacity: p.opacity}
 	var drawn Color // the border's, if any
 	if bw > 0 {
 		op.Border = p.borders([4]float32{bw, bw, bw, bw})
@@ -436,7 +454,10 @@ func (p *Painter) background(e *node, box Rect, withBorder bool) {
 	if !visible && !border {
 		return
 	}
-	op := scene.Op{Kind: scene.OpFill, Rect: p.snap(box), Radii: p.radii(e.radius), Continuous: continuousCorners, Color: e.bg.scene(), Opacity: p.opacity}
+	// A box with a border snaps whole even when the border goes on an op
+	// of its own: the fill and the border must land on the same pixels.
+	rect, tr := p.snapBox(box, e.hasBorder())
+	op := scene.Op{Kind: scene.OpFill, Rect: rect, Transform: tr, Radii: p.radii(e.radius), Continuous: continuousCorners, Color: e.bg.scene(), Opacity: p.opacity}
 	var bc Color // the border's, if op draws it
 	if border {
 		op.Border, op.BorderColor, op.Dashed = p.borders(e.border), e.borderC.scene(), e.borderStyle == BorderDashed
@@ -483,7 +504,8 @@ func anyVisible(stops []GradientStop) bool {
 
 // border paints e's border alone.
 func (p *Painter) border(e *node, box Rect) {
-	op := scene.Op{Kind: scene.OpFill, Rect: p.snap(box), Radii: p.radii(e.radius), Continuous: continuousCorners, Opacity: p.opacity,
+	rect, tr := p.snapBox(box, true)
+	op := scene.Op{Kind: scene.OpFill, Rect: rect, Transform: tr, Radii: p.radii(e.radius), Continuous: continuousCorners, Opacity: p.opacity,
 		Border: p.borders(e.border), BorderColor: e.borderC.scene(), Dashed: e.borderStyle == BorderDashed, Wide: p.wide(Color{}, Color{}, e.borderC)}
 	if g := e.grads; g != nil && g.border != borderColor {
 		// The gradient paints it, times opaque white.
@@ -1122,7 +1144,8 @@ func (p *Painter) Stroke(r Rect, c Color, radius, width float32) {
 // StrokeDashed paints the outline of a rounded rectangle in dashes, as a
 // dashed border.
 func (p *Painter) StrokeDashed(r Rect, c Color, radius, width float32) {
-	op := scene.Op{Kind: scene.OpFill, Rect: p.snap(r), Radii: p.radii([4]float32{radius, radius, radius, radius}), Continuous: continuousCorners,
+	rect, tr := p.snapBox(r, true)
+	op := scene.Op{Kind: scene.OpFill, Rect: rect, Transform: tr, Radii: p.radii([4]float32{radius, radius, radius, radius}), Continuous: continuousCorners,
 		Border: p.borders([4]float32{width, width, width, width}), BorderColor: c.scene(), Dashed: true, Opacity: p.opacity, Wide: p.wide(Color{}, Color{}, c)}
 	p.add(op)
 }
