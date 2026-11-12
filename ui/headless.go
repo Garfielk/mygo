@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/raster"
 	"github.com/egoist/mygo/internal/scene"
+	"github.com/egoist/mygo/internal/text"
 	"github.com/egoist/mygo/transfer"
 )
 
@@ -21,6 +22,9 @@ type headless struct {
 	// maxButton is where the view shows the maximize button.
 	maxButton Rect
 	img       raster.Renderer
+	// text is the window's text system, its own so that the Tester's
+	// frames shape and paint apart from the other windows' (textSystem).
+	text *text.System
 	// requested is set when the view asks for a frame, from any goroutine
 	// for invalidate.
 	requested atomic.Bool
@@ -104,6 +108,16 @@ func (h *headless) refreshRate() float32              { return h.hz }
 func (h *headless) setFrameRate(fps float32)          { h.frameRate = fps }
 func (h *headless) framesAtOnce() bool                { return h.atOnce }
 func (h *headless) occluded() bool                    { return h.hidden }
+
+// textSystem returns the window's text system, making its own the first
+// time, as a Tester's window shapes and paints apart from the others'
+// shared one (#1722).
+func (h *headless) textSystem() *text.System {
+	if h.text == nil {
+		h.text = text.New()
+	}
+	return h.text
+}
 func (h *headless) present(s *scene.Scene) {
 	h.last = s
 	h.img.Render(s)
@@ -514,6 +528,7 @@ func platformPreferences(p Preferences) platform.Preferences {
 // draws text as the system does by default.
 func (t *Tester) SetLocale(tag string) {
 	t.h.lang = tag
+	t.rt.text.SetLanguage(tag)
 	t.rt.changed()
 	t.settle()
 }

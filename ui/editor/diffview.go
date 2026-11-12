@@ -601,6 +601,7 @@ func DiffView(c *ui.Context, d *DiffState) ui.Element {
 		root.Draw(func(p *ui.Painter, r ui.Rect) {
 			ed := &d.eds[1]
 			ed.layout(r.W, r.H, p.Scale())
+			d.oldView.sys = ed.view.sys
 			d.oldView.setStyle(ed.view.font, ed.o.lineHeight, p.Scale(), ed.tabSize())
 			d.oldView.setWrap(ed.view.wrap, ed.view.wrapWidth)
 			d.prepare()
@@ -834,6 +835,7 @@ func (d *DiffState) fit() {
 	if d.Layout == DiffUnified {
 		eds = d.eds[1:]
 		ed := &d.eds[1]
+		d.oldView.sys = ed.view.sys
 		d.oldView.setStyle(ed.view.font, ed.o.lineHeight, max(1, ed.view.scale), ed.tabSize())
 		d.oldView.setWrap(ed.view.wrap, ed.view.wrapWidth)
 	}

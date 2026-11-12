@@ -66,6 +66,10 @@ type host interface {
 	// regional formats; they cost nothing.
 	locale() string
 	region() i18n.Region
+	// textSystem returns the text system the window's frames shape and
+	// paint in: a Tester's window has one of its own, so Testers run in
+	// parallel, and the other windows share the process's.
+	textSystem() *text.System
 	// rightToLeft reports whether the window is laid out right to left,
 	// as its language reads.
 	rightToLeft() bool
@@ -206,6 +210,9 @@ type engine struct {
 	built      []*state
 	nbuilt     int
 	builtCheck map[*state]bool // checkBuilt's
+	// builtSnap is what the view built, the checkBuilt of the tests: its
+	// own of the engine's, as Testers check their frames in parallel.
+	builtSnap *builtSnapshot
 	// targetsBuilt is the frame and pass that last made an element a
 	// native drop target (DropData, DataDragOver): syncDropFormats looks
 	// for their formats only when they are this frame's last pass.
@@ -647,7 +654,7 @@ type keyEvent struct {
 }
 
 func newRuntime(view func(*context), h host) *engine {
-	rt := &engine{view: view, host: h, text: textSystem(), states: map[uint64]*state{}, windowFocused: true}
+	rt := &engine{view: view, host: h, text: h.textSystem(), states: map[uint64]*state{}, windowFocused: true}
 	rt.c.rt = rt
 	rt.owner = weak.Make(rt)
 	rt.arena = &elementOwner{rt: rt}

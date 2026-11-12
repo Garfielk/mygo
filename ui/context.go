@@ -1013,8 +1013,11 @@ func (rt *engine) unlook(s *state) {
 	}
 }
 
-// textSystem is the shared text system.
-func textSystem() *text.System { return text.Shared() }
+// TextSystem returns the window's text system: the shared one, unless
+// the window is a Tester's, whose own system keeps its shaping and its
+// glyph atlases apart from the other windows' (#1722). Drawings shape
+// text for Painter.Glyphs in the system they draw with.
+func (c *Context) TextSystem() *text.System { return c.rt.text }
 
 // sceneColor converts a color for the scene.
 func sceneColor(c Color) scene.Color { return c.scene() }

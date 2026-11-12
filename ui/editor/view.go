@@ -39,6 +39,11 @@ type view struct {
 	wrapWidth  float32
 	scale      float32
 	theme      *Theme
+	// sys is the text system of the window the editor draws in, which
+	// build sets of the context each frame: a Tester's window shapes
+	// apart from the others' shared system (#1722). A view styled before
+	// a frame built it shapes in the shared one.
+	sys *text.System
 	// faces are the faces of the kinds of tokens, by the theme; styled
 	// tells whether any is not the regular one.
 	faces  [tokenKinds]uint8
@@ -180,6 +185,7 @@ type lineCache struct {
 // over as it uses them, and those of this one.
 type shapeCache struct {
 	style     text.Style
+	sys       *text.System
 	prev, cur map[shapeKey]*text.Layout
 }
 
@@ -206,14 +212,23 @@ func (c *shapeCache) getSpans(s, spans string, style text.Style) *text.Layout {
 		c.cur[k] = l
 		return l
 	}
-	l := shapeText(text.Params{Text: s, Style: style, NoWrap: true, KeepSpaces: true, Spans: spans})
+	l := shapeText(orShared(c.sys), text.Params{Text: s, Style: style, NoWrap: true, KeepSpaces: true, Spans: spans})
 	c.cur[k] = l
 	return l
 }
 
-// shapeText shapes text for the view: text.Shared().Shape, which tests
-// replace with a shaper of their own.
-var shapeText = func(p text.Params) *text.Layout { return text.Shared().Shape(p) }
+// shapeText shapes text for the view in the system of the window the
+// editor draws in, which tests replace with a shaper of their own.
+var shapeText = func(sys *text.System, p text.Params) *text.Layout { return sys.Shape(p) }
+
+// orShared returns sys, or the shared text system for a view styled
+// before a frame built it.
+func orShared(sys *text.System) *text.System {
+	if sys == nil {
+		return text.Shared()
+	}
+	return sys
+}
 
 func (c *shapeCache) endFrame() {
 	c.prev, c.cur = c.cur, c.prev
@@ -230,20 +245,21 @@ func (c *shapeCache) endFrame() {
 // out in are shaped to fit (wrapBreaks).
 type charWidths struct {
 	style text.Style
+	sys   *text.System
 	ascii [128]float32
 	other map[rune]float32
 	mono  float32 // the advance of every printable ASCII character, if one
 }
 
-func (w *charWidths) reset(style text.Style) {
+func (w *charWidths) reset(style text.Style, sys *text.System) {
 	if w.style == style && w.other != nil {
 		return
 	}
-	*w = charWidths{style: style, other: map[rune]float32{}}
+	*w = charWidths{style: style, sys: sys, other: map[rune]float32{}}
 	for i := range w.ascii {
 		w.ascii[i] = -1
 	}
-	l := shapeText(text.Params{Text: asciiPrintableCode, Style: style, NoWrap: true, KeepSpaces: true})
+	l := shapeText(orShared(sys), text.Params{Text: asciiPrintableCode, Style: style, NoWrap: true, KeepSpaces: true})
 	mono := float32(-1)
 	if len(l.Lines) == 1 {
 		line := l.Lines[0]
@@ -278,7 +294,7 @@ func (w *charWidths) of(r rune) float32 {
 	if v, ok := w.other[r]; ok {
 		return v
 	}
-	l := shapeText(text.Params{Text: string(r), Style: w.style, NoWrap: true, KeepSpaces: true})
+	l := shapeText(orShared(w.sys), text.Params{Text: string(r), Style: w.style, NoWrap: true, KeepSpaces: true})
 	v := l.Width
 	if len(w.other) < 4096 {
 		w.other[r] = v
@@ -304,7 +320,7 @@ func (v *view) widthsOf(face uint8) *charWidths {
 		return &v.widths
 	}
 	w := &v.faceWidths[face&3]
-	w.reset(v.faceStyle(face))
+	w.reset(v.faceStyle(face), v.sys)
 	return w
 }
 
@@ -378,10 +394,12 @@ func (v *view) setStyle(f ui.Font, lineHeight, scale float32, tabSize int) {
 	}
 	lh := float32(math.Round(float64(f.Size*lineHeight*scale))) / scale
 	tabSize = max(1, min(tabSize, 16))
+	sys := orShared(v.sys)
+	v.shaped.sys = sys
 	// A new generation of the text system shapes text anew, as when the
 	// language the app shows changes, which the editor's text, naming
 	// none, is shaped in: what was measured and shaped is to be again.
-	gen := text.Shared().Generation()
+	gen := sys.Generation()
 	if v.style == style && v.lineHeight == lh && v.tabSize == tabSize && v.scale == scale && v.textGen == gen {
 		return
 	}
@@ -395,9 +413,9 @@ func (v *view) setStyle(f ui.Font, lineHeight, scale float32, tabSize int) {
 	v.font, v.style, v.lineHeight, v.tabSize, v.scale = f, style, lh, tabSize, scale
 	v.heights.lh = lh
 	v.heights.dirty = true
-	a, d, _ := text.Shared().Metrics(style)
+	a, d, _ := sys.Metrics(style)
 	v.ascent, v.descent = a, d
-	v.widths.reset(style)
+	v.widths.reset(style, sys)
 	v.charWidth = v.widths.of('0')
 	if fontChanged {
 		v.maxLine = 0

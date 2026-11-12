@@ -3,7 +3,6 @@ package ui
 import (
 	"math"
 	"strings"
-	"sync"
 
 	"github.com/egoist/mygo/internal/imagesrc"
 	"github.com/egoist/mygo/internal/platform"
@@ -1846,16 +1845,12 @@ func (e *node) TextShadow(x, y, blur float32, c Color) *node {
 // sets them, which differs between systems.
 func (e *node) TabSize(n float32) *node {
 	if n > 0 {
-		linkTabs.Do(text.Shared().UseTabSize)
+		e.c.rt.text.UseTabSize()
 	}
 	e.ts.tabSize = max(n, 0)
 	e.ts.set |= setTabSize
 	return e
 }
-
-// linkTabs lets the text system set tab stops once an element sets a tab
-// size, so that apps that never do not link it.
-var linkTabs sync.Once
 
 // Strikethrough strikes text through.
 func (e *node) Strikethrough() *node { e.ts.strike = true; e.ts.set |= setStrike; return e }
@@ -1933,14 +1928,10 @@ func (e *node) Balance() *node { e.balance = true; return e }
 // paragraph of body text then ends on more than one word, at no cost to
 // the rest of its lines; Balance balances them all instead.
 func (e *node) Pretty() *node {
-	linkPretty.Do(text.Shared().UsePretty)
+	e.c.rt.text.UsePretty()
 	e.pretty = true
 	return e
 }
-
-// linkPretty lets the text system wrap text pretty once an element or a
-// TextShape asks for it, so that apps that never do not link it.
-var linkPretty sync.Once
 
 // PreserveSpaces keeps the spaces the element's text ends its lines with,
 // and a text of only spaces, with their advance, as CSS's white-space:
@@ -1959,14 +1950,10 @@ func (e *node) Ellipsis(s string) *node { e.ellipsis = s; return e }
 // layout gives it: a list of files shows "src/components/…/picker.go",
 // whose folder and file's name both show.
 func (e *node) TruncateMiddle() *node {
-	linkTruncateMiddle.Do(text.Shared().UseTruncateMiddle)
+	e.c.rt.text.UseTruncateMiddle()
 	e.middle = true
 	return e
 }
-
-// linkTruncateMiddle lets the text system cut text in its middle once an
-// element asks for it, so that apps that never do not link it.
-var linkTruncateMiddle sync.Once
 
 // Label names the element for assistive technology and for finding it in
 // tests, when its text does not.

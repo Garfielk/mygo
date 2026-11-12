@@ -807,12 +807,12 @@ func TestCodeEditorWrapLongLines(t *testing.T) {
 // quarter of an em between Han and Latin letters, given to the advance of
 // the one before as penAdvances does, and CJK punctuation that ends a
 // text takes half its width. on tells whether it does.
-func contextSpaced(on func() bool) func(text.Params) *text.Layout {
+func contextSpaced(on func(*text.System) bool) func(*text.System, text.Params) *text.Layout {
 	han := func(r rune) bool { return r >= 0x4e00 && r <= 0x9fff }
 	latin := func(r rune) bool { return r < 0x80 && (unicode.IsLetter(r) || unicode.IsDigit(r)) }
-	return func(p text.Params) *text.Layout {
-		l := text.Shared().Shape(p)
-		if !on() {
+	return func(sys *text.System, p text.Params) *text.Layout {
+		l := sys.Shape(p)
+		if !on(sys) {
 			return l
 		}
 		out := *l
@@ -846,7 +846,7 @@ func contextSpaced(on func() bool) func(text.Params) *text.Layout {
 }
 
 // useShaper shapes the editors' text with shape until the test ends.
-func useShaper(t *testing.T, shape func(text.Params) *text.Layout) {
+func useShaper(t *testing.T, shape func(*text.System, text.Params) *text.Layout) {
 	old := shapeText
 	shapeText = shape
 	t.Cleanup(func() { shapeText = old })
@@ -882,7 +882,7 @@ const chineseText = "城城城城城城城城城城城城城城城城城城城�
 // Chinese text, which no character shaped alone has, keeps wrapped rows
 // within the editor (#1576).
 func TestCodeEditorWrapContextSpacing(t *testing.T) {
-	useShaper(t, contextSpaced(func() bool { return true }))
+	useShaper(t, contextSpaced(func(*text.System) bool { return true }))
 	ct := newEditorTest(t, "", chineseText)
 	ct.st.SoftWrap = true
 	v := &ct.st.ed.view
@@ -900,16 +900,14 @@ func TestCodeEditorWrapContextSpacing(t *testing.T) {
 // app's language: when it changes, the rows are measured and shaped
 // again, in the spacing of the new one.
 func TestCodeEditorWrapLanguageChange(t *testing.T) {
-	sys := text.Shared()
-	t.Cleanup(func() { sys.SetLanguage("") })
-	sys.SetLanguage("")
-	useShaper(t, contextSpaced(func() bool { return sys.Language() == "zh-Hans" }))
+	useShaper(t, contextSpaced(func(sys *text.System) bool { return sys.Language() == "zh-Hans" }))
 	ct := newEditorTest(t, "", strings.Repeat("城a", 80))
+	t.Cleanup(func() { ct.tt.SetLocale("") })
 	ct.st.SoftWrap = true
 	ct.tt.Frame()
 	v := &ct.st.ed.view
 	before := len(v.line(0).rows)
-	sys.SetLanguage("zh-Hans")
+	ct.tt.SetLocale("zh-Hans")
 	ct.tt.Frame()
 	if after := len(v.line(0).rows); after <= before {
 		t.Errorf("in Chinese, the line takes %d rows, as many as before (%d)", after, before)
